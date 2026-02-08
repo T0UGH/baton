@@ -1,10 +1,15 @@
-#!/usr/bin/env node
+/**
+ * CLI 交互模式
+ * 提供命令行交互界面，用于本地开发和测试，直接通过终端与 Agent 对话
+ * 适合开发调试和无 IM 平台配置的场景
+ */
 import readline from 'node:readline/promises';
 import { CommandDispatcher } from './core/dispatcher';
-import type { IMMessage } from './types';
+import { SessionManager } from './core/session';
+import { TaskQueueEngine } from './core/queue';
+import type { IMMessage, IMResponse, Session } from './types';
 
 const projectPath = process.cwd();
-const dispatcher = new CommandDispatcher(projectPath);
 
 console.log('╔════════════════════════════════════════╗');
 console.log('║           Baton CLI v0.1.0             ║');
@@ -13,11 +18,28 @@ console.log('╚═════════════════════�
 console.log(`\nProject: ${projectPath}\n`);
 
 // 模拟 IM 消息循环
-async function main() {
+export async function main() {
   console.log('Type your message (or command), or "quit" to exit:\n');
-  
+
   const mockUserId = 'local-user';
   const mockUserName = 'Developer';
+  let isShuttingDown = false;
+
+  // 创建会话管理器
+  const sessionManager = new SessionManager(projectPath);
+
+  // 创建任务队列引擎，传入完成回调（在终端显示）
+  const queueEngine = new TaskQueueEngine(async (session: Session, response: IMResponse) => {
+    if (isShuttingDown) return;
+    console.log('\n' + '─'.repeat(50));
+    console.log('🤖 Agent 回复:');
+    console.log(response.message);
+    console.log('─'.repeat(50));
+    console.log();
+  });
+
+  // 创建指令分发器
+  const dispatcher = new CommandDispatcher(sessionManager, queueEngine);
 
   // 使用 readline 读取用户输入
   const rl = readline.createInterface({
@@ -25,39 +47,64 @@ async function main() {
     output: process.stdout,
   });
 
-  while (true) {
-    const text = (await rl.question('> ')).trim();
-    
-    if (text.toLowerCase() === 'quit' || text.toLowerCase() === 'exit') {
-      console.log('\n👋 Goodbye!');
-      rl.close();
-      process.exit(0);
-    }
+  // 设置 Ctrl+C 处理
+  rl.on('SIGINT', () => {
+    console.log('\n👋 Goodbye!');
+    isShuttingDown = true;
+    rl.close();
+    process.exit(0);
+  });
 
-    if (!text) continue;
+  // 同时监听 process 的 SIGINT（某些终端 readline 捕获不到）
+  process.on('SIGINT', () => {
+    console.log('\n👋 Goodbye!');
+    isShuttingDown = true;
+    rl.close();
+    process.exit(0);
+  });
 
-    const message: IMMessage = {
-      userId: mockUserId,
-      userName: mockUserName,
-      text,
-      timestamp: Date.now()
-    };
+  try {
+    while (true) {
+      if (isShuttingDown) break;
 
-    try {
-      console.log('\n⏳ Processing...\n');
-      const response = await dispatcher.dispatch(message);
-      
-      console.log('─'.repeat(50));
-      console.log('📨 Response:');
-      console.log(response.message);
-      if (response.data) {
-        console.log('\n📊 Data:', JSON.stringify(response.data, null, 2));
+      const text = (await rl.question('> ')).trim();
+
+      if (text.toLowerCase() === 'quit' || text.toLowerCase() === 'exit') {
+        console.log('\n👋 Goodbye!');
+        rl.close();
+        break;
       }
-      console.log('─'.repeat(50));
-      console.log();
-    } catch (error) {
-      console.error('❌ Error:', error);
+
+      if (!text) continue;
+
+      const message: IMMessage = {
+        userId: mockUserId,
+        userName: mockUserName,
+        text,
+        timestamp: Date.now(),
+      };
+
+      try {
+        const response = await dispatcher.dispatch(message);
+
+        // 如果是系统指令，直接显示结果
+        if (!text.startsWith('/') || text === '/help' || text === '/current') {
+          console.log('─'.repeat(50));
+          console.log('📨 Response:');
+          console.log(response.message);
+          if (response.data) {
+            console.log('\n📊 Data:', JSON.stringify(response.data, null, 2));
+          }
+          console.log('─'.repeat(50));
+          console.log();
+        }
+        // 如果是 prompt，等待回调显示结果
+      } catch (error) {
+        console.error('❌ Error:', error);
+      }
     }
+  } finally {
+    rl.close();
   }
 }
 

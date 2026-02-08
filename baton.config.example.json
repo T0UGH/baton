@@ -1,0 +1,19 @@
+{
+  "project": {
+    "path": ".",
+    "name": "my-project"
+  },
+  "feishu": {
+    "appId": "cli_xxxxxxxxxxxxxxxx",
+    "appSecret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "domain": "feishu",
+    "card": {
+      "permissionTimeout": 300
+    }
+  },
+  "acp": {
+    "command": "opencode",
+    "args": ["acp"],
+    "cwd": "."
+  }
+}

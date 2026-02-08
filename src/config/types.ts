@@ -1,0 +1,59 @@
+/**
+ * Baton 配置类型定义
+ * 定义应用配置的数据结构和 TypeScript 类型，包括项目、飞书、ACP 等配置
+ * 确保配置项的类型安全和代码提示支持
+ */
+
+export interface BatonConfig {
+  // 项目配置
+  project: {
+    path: string;
+    name: string;
+  };
+
+  // 飞书配置（长链接模式）
+  feishu?: FeishuConfig;
+
+  // ACP 配置
+  acp?: ACPConfig;
+}
+
+export interface FeishuConfig {
+  // 应用凭证
+  appId: string;
+  appSecret: string;
+
+  // 域名配置（飞书/ Lark）
+  domain?: 'feishu' | 'lark';
+
+  // 消息卡片配置
+  card?: {
+    // 权限确认卡片超时时间（秒）
+    permissionTimeout: number;
+  };
+}
+
+export interface ACPConfig {
+  // Agent 命令
+  command: string;
+  args: string[];
+
+  // 工作目录
+  cwd: string;
+
+  // 环境变量
+  env?: Record<string, string>;
+}
+
+// 默认配置
+export const DEFAULT_CONFIG: Partial<BatonConfig> = {
+  project: {
+    path: process.cwd(),
+    name: 'default',
+  },
+  acp: {
+    command: 'opencode',
+    args: ['acp'],
+    cwd: process.cwd(),
+  },
+};

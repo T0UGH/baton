@@ -56,3 +56,4 @@ PRD.md  # Product requirement doc (internal)
 # ACP artifacts
 .acp/
 agent-logs/
+baton.config.json

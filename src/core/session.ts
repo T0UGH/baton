@@ -1,11 +1,19 @@
-import type { Session, Task, IMResponse } from '../types';
+/**
+ * 会话管理器
+ * 管理用户会话生命周期，包括创建、查找、销毁和 ACP Agent 进程的启停
+ * 提供用户隔离机制，确保每个用户有独立的执行环境和状态
+ */
+import type { Session, IMResponse } from '../types';
 import { ACPClient } from '../acp/client';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('SessionManager');
 
 // 简单的 UUID 生成函数
 function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
 }
@@ -22,7 +30,7 @@ export class SessionManager {
 
   async getOrCreateSession(userId: string): Promise<Session> {
     const sessionKey = `${userId}:${this.projectPath}`;
-    
+
     if (!sessions.has(sessionKey)) {
       const session: Session = {
         id: generateUUID(),
@@ -31,19 +39,19 @@ export class SessionManager {
         acpClient: null,
         queue: {
           pending: [],
-          current: null
+          current: null,
         },
-        isProcessing: false
+        isProcessing: false,
       };
       sessions.set(sessionKey, session);
-      console.log(`[Session] Created new session for user ${userId}`);
+      logger.info(`[Session] Created new session for user ${userId}`);
     }
 
     const session = sessions.get(sessionKey)!;
-    
+
     // 确保 agent 进程已启动
     if (!session.acpClient) {
-      console.log(`[Session] Starting agent for session ${session.id}`);
+      logger.info(`[Session] Starting agent for session ${session.id}`);
       const acpClient = new ACPClient(this.projectPath);
       await acpClient.startAgent();
       session.acpClient = acpClient;
@@ -60,16 +68,16 @@ export class SessionManager {
   async resetSession(userId: string): Promise<IMResponse> {
     const sessionKey = `${userId}:${this.projectPath}`;
     const session = sessions.get(sessionKey);
-    
+
     if (session?.acpClient) {
       await session.acpClient.stop();
     }
-    
+
     sessions.delete(sessionKey);
-    
+
     return {
       success: true,
-      message: 'Session reset successfully. All context cleared.'
+      message: 'Session reset successfully. All context cleared.',
     };
   }
 
@@ -78,7 +86,7 @@ export class SessionManager {
     if (!session) {
       return {
         success: true,
-        message: 'No active session.'
+        message: 'No active session.',
       };
     }
 
@@ -86,13 +94,13 @@ export class SessionManager {
       current: session.queue.current,
       pending: session.queue.pending,
       pendingCount: session.queue.pending.length,
-      isProcessing: session.isProcessing
+      isProcessing: session.isProcessing,
     };
 
     return {
       success: true,
       message: `Queue status: ${queueInfo.pendingCount} pending, ${session.isProcessing ? 'processing' : 'idle'}`,
-      data: queueInfo
+      data: queueInfo,
     };
   }
 
@@ -101,7 +109,7 @@ export class SessionManager {
     if (!session) {
       return {
         success: false,
-        message: 'No active session.'
+        message: 'No active session.',
       };
     }
 
@@ -113,10 +121,10 @@ export class SessionManager {
       session.queue.pending = [];
       session.queue.current = null;
       session.isProcessing = false;
-      
+
       return {
         success: true,
-        message: 'All tasks stopped and queue cleared.'
+        message: 'All tasks stopped and queue cleared.',
       };
     }
 
@@ -127,12 +135,12 @@ export class SessionManager {
         session.queue.pending.splice(index, 1);
         return {
           success: true,
-          message: `Task ${taskId} removed from queue.`
+          message: `Task ${taskId} removed from queue.`,
         };
       }
       return {
         success: false,
-        message: `Task ${taskId} not found in queue.`
+        message: `Task ${taskId} not found in queue.`,
       };
     }
 
@@ -141,16 +149,16 @@ export class SessionManager {
       await session.acpClient.cancelCurrentTask();
       session.queue.current = null;
       session.isProcessing = false;
-      
+
       return {
         success: true,
-        message: 'Current task stopped.'
+        message: 'Current task stopped.',
       };
     }
 
     return {
       success: true,
-      message: 'No running task to stop.'
+      message: 'No running task to stop.',
     };
   }
 }
