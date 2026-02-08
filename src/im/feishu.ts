@@ -11,6 +11,8 @@ import { SessionManager } from '../core/session';
 import { TaskQueueEngine } from '../core/queue';
 import { createLogger } from '../utils/logger';
 import { BaseIMAdapter, IMPlatform, type IMMessageFormat, type IMReplyOptions } from './adapter';
+import { convertToFeishuCard } from './feishu/converter';
+import type { UniversalCard } from './types';
 
 const logger = createLogger('FeishuAdapter');
 
@@ -49,6 +51,8 @@ export class FeishuAdapter extends BaseIMAdapter {
   private queueEngine: TaskQueueEngine;
   // 存储 message_id 用于后续回复
   private messageContext: Map<string, { chatId: string; messageId: string }> = new Map();
+  // 存储 sessionContext 用于权限请求反查 userId
+  private sessionContext: Map<string, { userId: string }> = new Map();
 
   constructor(config: BatonConfig) {
     super();
@@ -67,7 +71,15 @@ export class FeishuAdapter extends BaseIMAdapter {
     });
 
     // 创建会话管理器
-    this.sessionManager = new SessionManager(config.project.path);
+    this.sessionManager = new SessionManager(
+      config.project.path,
+      config.feishu.card?.permissionTimeout
+    );
+    
+    // 监听权限请求事件
+    this.sessionManager.on('permissionRequest', async (event) => {
+      await this.handlePermissionRequest(event);
+    });
 
     // 创建任务队列引擎，传入完成回调
     this.queueEngine = new TaskQueueEngine(this.onTaskComplete.bind(this));
@@ -107,9 +119,66 @@ export class FeishuAdapter extends BaseIMAdapter {
     // 注册卡片交互事件
     this.eventDispatcher.register({
       'card.action.trigger': async (data: any) => {
-        await this.handleCardAction(data);
+        return await this.handleCardAction(data);
       },
     });
+  }
+  
+  // 处理权限请求，发送交互卡片
+  private async handlePermissionRequest(event: any): Promise<void> {
+    const { sessionId, requestId, request } = event;
+    const toolName = request.toolCall.title || 'Unknown Action';
+    const options = request.options as any[];
+
+    logger.info({ sessionId, requestId, toolName }, 'Handling permission request');
+
+    // 尝试获取 chatId
+    const context = this.messageContext.get(sessionId);
+    if (!context) {
+      logger.warn(
+        { sessionId },
+        'No message context found for session, cannot send permission card'
+      );
+      // 这里应该有一个 fallback，比如尝试给用户私聊，但现在先跳过
+      return;
+    }
+
+    // 构建动态按钮
+    const actions = options.map((opt) => ({
+      id: `permission_${opt.optionId}`,
+      text: opt.label,
+      style:
+        opt.label.toLowerCase().includes('allow') || opt.label.toLowerCase().includes('yes')
+          ? 'primary'
+          : opt.label.toLowerCase().includes('deny') || opt.label.toLowerCase().includes('no')
+            ? 'danger'
+            : 'default',
+      value: JSON.stringify({
+        action: 'resolve_permission',
+        session_id: sessionId,
+        request_id: requestId,
+        option_id: opt.optionId,
+      }),
+    }));
+
+    // 构建通用卡片
+    const card: UniversalCard = {
+      title: '⚠️ 权限确认请求',
+      elements: [
+        {
+          type: 'markdown',
+          content: `Agent 请求执行以下操作：\n**${toolName}**`,
+        },
+        {
+          type: 'text',
+          content: '请确认是否允许此操作。该操作将在项目根目录下执行。',
+        },
+      ],
+      actions: actions as any[],
+    };
+
+    // 发送卡片
+    await this.sendMessage(context.chatId, { card });
   }
 
   private async handleMessage(data: FeishuMessageData): Promise<void> {
@@ -170,6 +239,9 @@ export class FeishuAdapter extends BaseIMAdapter {
         chatId: message.chat_id,
         messageId: message.message_id,
       });
+      
+      // 存储 sessionContext
+      this.sessionContext.set(session.id, { userId });
 
       // 添加 "眼睛" reaction 表示已读（仅在 message_id 存在时）
       if (message.message_id) {
@@ -191,8 +263,53 @@ export class FeishuAdapter extends BaseIMAdapter {
     }
   }
 
-  private async handleCardAction(_data: any): Promise<void> {
-    logger.info({ data: _data }, 'Card action received');
+  private async handleCardAction(data: any): Promise<void> {
+    logger.info({ action: data.action }, 'Card action received');
+    
+    try {
+      const actionValue = data.action.value;
+      // 飞书 action.value 可能是对象也可能是字符串，这里我们之前 JSON.stringify 了
+      let payload: any;
+      
+      // 尝试解析 payload
+      if (typeof actionValue === 'object') {
+          payload = actionValue;
+      } else {
+        try {
+          payload = JSON.parse(actionValue);
+        } catch (e) {
+          logger.warn({ actionValue }, 'Failed to parse action value JSON');
+          return;
+        }
+      }
+      
+      // 检查是否是权限处理动作
+      if (payload.action === 'resolve_permission') {
+        const { session_id, request_id, option_id } = payload;
+
+        logger.info(
+          { session_id, request_id, option_id },
+          'Resolving permission from card interaction'
+        );
+
+        // 调用 SessionManager 解决权限
+        // 注意：resolvePermission 是我们刚加的方法，需要确保 SessionManager 上有这个方法
+        const result = this.sessionManager.resolvePermission(session_id, request_id, option_id);
+
+        // 更新卡片或发送通知
+        // 飞书允许直接返回新的卡片内容来更新原卡片（Toast）
+        // 这里我们可以简单地返回一个 Toast
+        return {
+          toast: {
+            type: result.success ? 'success' : 'error',
+            content: result.message,
+          },
+          // 可选：更新原卡片状态，比如把按钮置灰
+        } as any;
+      }
+    } catch (error) {
+      logger.error(error, 'Error handling card action');
+    }
   }
 
   // 实现 IMAdapter 接口方法
@@ -294,15 +411,38 @@ export class FeishuAdapter extends BaseIMAdapter {
     }
 
     const { chatId, messageId } = context;
-    const formattedMessage = this.formatMessage(response);
 
-    // 发送 agent 的回复
-    await this.sendReply(chatId, messageId, formattedMessage);
+    // 构建富文本完成卡片
+    const completionCard: UniversalCard = {
+      title: response.success ? '✅ 任务执行成功' : '❌ 任务执行失败',
+      elements: [
+        {
+          type: 'markdown',
+          content: this.truncateMessage(response.message, 2000), // 飞书卡片长度限制
+        },
+        {
+          type: 'field_group',
+          fields: [
+            { title: 'Session ID', content: session.id },
+            { title: '项目', content: this.config.project.name },
+            { title: '状态', content: response.success ? 'Completed' : 'Failed' },
+          ],
+        },
+      ],
+    };
+
+    // 发送卡片回复
+    await this.sendReply(chatId, messageId, { card: completionCard });
 
     // 添加完成 reaction
     await this.addReaction(chatId, messageId, 'OK').catch(() => {});
 
-    logger.info({ sessionId: session.id, chatId }, 'Task completed and reply sent');
+    logger.info({ sessionId: session.id, chatId }, 'Task completed and rich card sent');
+  }
+
+  private truncateMessage(msg: string, limit: number): string {
+    if (msg.length <= limit) return msg;
+    return msg.substring(0, limit) + '\n\n...(内容过多已截断)';
   }
 
   formatMessage(response: IMResponse): IMMessageFormat {
@@ -317,7 +457,7 @@ export class FeishuAdapter extends BaseIMAdapter {
 
   private buildFeishuContent(message: IMMessageFormat): any {
     if (message.card) {
-      return message.card;
+      return convertToFeishuCard(message.card);
     }
 
     if (message.code) {

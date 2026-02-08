@@ -20,26 +20,30 @@ export class CommandDispatcher {
     const trimmed = text.trim();
 
     // System Meta Commands (优先级最高)
+    // System Meta Commands (优先级最高)
     if (trimmed.startsWith('/repo')) {
       return { type: 'repo', args: trimmed.split(' ').slice(1), raw: trimmed };
     }
-    if (trimmed === '/current') {
+    if (trimmed.startsWith('/current')) {
       return { type: 'current', args: [], raw: trimmed };
     }
     if (trimmed.startsWith('/stop')) {
       return { type: 'stop', args: trimmed.split(' ').slice(1), raw: trimmed };
     }
-    if (trimmed === '/reset') {
+    if (trimmed.startsWith('/reset')) {
       return { type: 'reset', args: [], raw: trimmed };
     }
     if (trimmed.startsWith('/mode')) {
       return { type: 'mode', args: trimmed.split(' ').slice(1), raw: trimmed };
     }
-    if (trimmed === '/help') {
+    if (trimmed.startsWith('/help')) {
       return { type: 'help', args: [], raw: trimmed };
     }
-
-    // 默认作为 prompt 处理
+    if (trimmed.startsWith('/select')) {
+      return { type: 'select', args: trimmed.split(' ').slice(1), raw: trimmed };
+    }
+    
+    // Agent Passthrough (其他以 / 开头的)
     return { type: 'prompt', args: [trimmed], raw: trimmed };
   }
 
@@ -68,10 +72,27 @@ export class CommandDispatcher {
       case 'help':
         return this.handleHelp();
 
+      case 'select':
+        return this.handleSelect(message, command);
+
       case 'prompt':
       default:
         return this.handlePrompt(message, command);
     }
+  }
+
+  private async handleSelect(message: IMMessage, command: ParsedCommand): Promise<IMResponse> {
+    const requestId = command.args[0];
+    const optionIdOrIndex = command.args[1];
+    if (!requestId || optionIdOrIndex === undefined) {
+      return {
+        success: false,
+        message: '请提供请求 ID 和 选项 ID 或序号: /select <requestId> <optionIdOrIndex>',
+      };
+    }
+
+    const session = await this.sessionManager.getOrCreateSession(message.userId);
+    return this.sessionManager.resolvePermission(session.id, requestId, optionIdOrIndex);
   }
 
   private async handleRepo(_message: IMMessage, _command: ParsedCommand): Promise<IMResponse> {
@@ -111,7 +132,8 @@ export class CommandDispatcher {
 - /current - 查看当前会话状态
 - /stop [id/all] - 停止当前任务或清空队列
 - /reset - 重置会话（清除上下文）
-- /mode [mode_name] - 切换 Agent 模式
+- /mode [name] - 切换 Agent 模式
+- /select <reqId> <optId/index> - 选择权限请求选项
 - /help - 显示此帮助
 
 *Agent 交互：*
@@ -119,8 +141,7 @@ export class CommandDispatcher {
 - 所有非指令文本都会转发给 Agent
 
 *权限说明：*
-- MVP 版本所有文件/工具操作自动批准
-- 交互式权限确认将在后续版本添加
+- 敏感操作需用户确认，请使用 /select 指令或 IM 卡片进行交互
     `.trim();
 
     return {

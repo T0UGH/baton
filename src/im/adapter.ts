@@ -5,16 +5,12 @@
  */
 
 import type { IMResponse, Session } from '../types.js';
+import { IMPlatform } from './types.js';
+import type { UniversalCard } from './types.js';
 
-/**
- * IM 平台类型
- */
-export enum IMPlatform {
-  CLI = 'cli',
-  FEISHU = 'feishu',
-  SLACK = 'slack',
-  DISCORD = 'discord',
-}
+export { IMPlatform };
+export type { UniversalCard };
+
 
 /**
  * IM 回复选项
@@ -36,8 +32,8 @@ export interface IMMessageFormat {
   text?: string;
   // Markdown 内容
   markdown?: string;
-  // 卡片/富文本内容（平台特定格式）
-  card?: any;
+  // 通用卡片内容
+  card?: UniversalCard;
   // 代码块
   code?: {
     language: string;

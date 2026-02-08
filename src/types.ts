@@ -13,6 +13,12 @@ export interface Session {
   acpClient: ACPClient | null;
   queue: TaskQueue;
   isProcessing: boolean;
+  pendingPermissions: Map<string, {
+    resolve: (value: string) => void;
+    reject: (reason?: any) => void;
+    timestamp: number;
+    request: any; // 存储原始请求以获取选项列表
+  }>;
 }
 
 export interface Task {
@@ -40,7 +46,15 @@ export interface IMResponse {
   data?: any;
 }
 
-export type CommandType = 'repo' | 'current' | 'stop' | 'reset' | 'mode' | 'help' | 'prompt';
+export type CommandType =
+  | 'repo'
+  | 'current'
+  | 'stop'
+  | 'reset'
+  | 'mode'
+  | 'help'
+  | 'prompt'
+  | 'select';
 
 export interface ParsedCommand {
   type: CommandType;

@@ -8,12 +8,13 @@ import { CommandDispatcher } from './core/dispatcher';
 import { SessionManager } from './core/session';
 import { TaskQueueEngine } from './core/queue';
 import type { IMMessage, IMResponse, Session } from './types';
+import { createLogger } from './utils/logger';
 
+const logger = createLogger('CLI');
 const projectPath = process.cwd();
 
 console.log('╔════════════════════════════════════════╗');
 console.log('║           Baton CLI v0.1.0             ║');
-console.log('║     ChatOps for Local Development      ║');
 console.log('╚════════════════════════════════════════╝');
 console.log(`\nProject: ${projectPath}\n`);
 
@@ -28,6 +29,22 @@ export async function main() {
   // 创建会话管理器
   const sessionManager = new SessionManager(projectPath);
 
+  // 监听权限请求
+  sessionManager.on('permissionRequest', (event) => {
+    const { requestId, request } = event;
+    const options = request.options as any[];
+    console.log('\n' + '⚠️'.repeat(20));
+    console.log(`🔒 Permission Requested: ${request.toolCall.title}`);
+    console.log(`🆔 Request ID: ${requestId}`);
+    console.log('Available Options:');
+    options.forEach((opt, index) => {
+      console.log(`  [${index}] ${opt.name} (ID: ${opt.optionId})`);
+    });
+    console.log(`\n👉 Type /select <request_id> <option_id_or_index>`);
+    console.log('⚠️'.repeat(20) + '\n');
+    process.stdout.write('> '); // 恢复提示符
+  });
+
   // 创建任务队列引擎，传入完成回调（在终端显示）
   const queueEngine = new TaskQueueEngine(async (session: Session, response: IMResponse) => {
     if (isShuttingDown) return;
@@ -36,6 +53,7 @@ export async function main() {
     console.log(response.message);
     console.log('─'.repeat(50));
     console.log();
+    process.stdout.write('> '); // 恢复提示符
   });
 
   // 创建指令分发器
@@ -108,4 +126,4 @@ export async function main() {
   }
 }
 
-main().catch(console.error);
+main().catch((err) => console.error(err));

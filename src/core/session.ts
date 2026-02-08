@@ -6,6 +6,8 @@
 import type { Session, IMResponse } from '../types';
 import { ACPClient } from '../acp/client';
 import { createLogger } from '../utils/logger';
+import { EventEmitter } from 'node:events';
+import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 
 const logger = createLogger('SessionManager');
 
@@ -21,11 +23,14 @@ function generateUUID(): string {
 // 内存存储，进程重启即重置
 const sessions = new Map<string, Session>();
 
-export class SessionManager {
+export class SessionManager extends EventEmitter {
   private projectPath: string;
+  private permissionTimeout: number; // 毫秒
 
-  constructor(projectPath: string) {
+  constructor(projectPath: string, permissionTimeoutSeconds: number = 300) {
+    super();
     this.projectPath = projectPath;
+    this.permissionTimeout = permissionTimeoutSeconds * 1000;
   }
 
   async getOrCreateSession(userId: string): Promise<Session> {
@@ -42,6 +47,7 @@ export class SessionManager {
           current: null,
         },
         isProcessing: false,
+        pendingPermissions: new Map(),
       };
       sessions.set(sessionKey, session);
       logger.info(`[Session] Created new session for user ${userId}`);
@@ -52,12 +58,106 @@ export class SessionManager {
     // 确保 agent 进程已启动
     if (!session.acpClient) {
       logger.info(`[Session] Starting agent for session ${session.id}`);
-      const acpClient = new ACPClient(this.projectPath);
+
+      // 定义权限处理函数
+      const permissionHandler = async (req: RequestPermissionRequest): Promise<string> => {
+        return new Promise<string>((resolve, reject) => {
+          const requestId = generateUUID(); // 生成本次请求的唯一 ID
+
+          // 存入 pendingPermissions
+          session.pendingPermissions.set(requestId, {
+            resolve,
+            reject,
+            timestamp: Date.now(),
+            request: req,
+          });
+
+          logger.info(
+            { sessionId: session.id, requestId, tool: req.toolCall.title },
+            'Permission requested, waiting for user...'
+          );
+
+          // 触发事件通知 IM 层
+          this.emit('permissionRequest', {
+            sessionId: session.id,
+            requestId,
+            userId: session.userId,
+            request: req,
+          });
+
+          // 设置超时自动拒绝
+          setTimeout(() => {
+            if (session.pendingPermissions.has(requestId)) {
+              const pending = session.pendingPermissions.get(requestId);
+              // 默认拒绝：查找是否有 deny/cancel 选项，没有则选第一个
+              const fallbackOption =
+                req.options.find(
+                  (o: any) =>
+                    o.name.toLowerCase().includes('deny') ||
+                    o.name.toLowerCase().includes('cancel')
+                )?.optionId ||
+                req.options[0]?.optionId ||
+                'deny';
+              pending?.resolve(fallbackOption);
+              session.pendingPermissions.delete(requestId);
+              logger.warn({ sessionId: session.id, requestId }, 'Permission request timed out');
+            }
+          }, this.permissionTimeout);
+        });
+      };
+
+      const acpClient = new ACPClient(this.projectPath, permissionHandler);
       await acpClient.startAgent();
       session.acpClient = acpClient;
     }
 
     return session;
+  }
+
+  // 处理权限确认结果
+  resolvePermission(sessionId: string, requestId: string, optionIdOrIndex: string): IMResponse {
+    // 查找 session
+    let session: Session | undefined;
+    for (const s of sessions.values()) {
+      if (s.id === sessionId) {
+        session = s;
+        break;
+      }
+    }
+
+    if (!session) {
+      return { success: false, message: 'Session not found' };
+    }
+
+    const pending = session.pendingPermissions.get(requestId);
+    if (!pending) {
+      return { success: false, message: 'Permission request not found or expired' };
+    }
+
+    let finalOptionId = optionIdOrIndex;
+    const options = pending.request.options as any[];
+
+    // 检查是否是序号
+    const index = parseInt(optionIdOrIndex, 10);
+    if (!isNaN(index) && index >= 0 && index < options.length) {
+      finalOptionId = options[index].optionId;
+    } else {
+      // 检查 optionId 是否存在
+      const exists = options.some((o) => o.optionId === optionIdOrIndex);
+      if (!exists) {
+        return {
+          success: false,
+          message: `无效的选项: ${optionIdOrIndex}。可选: ${options.map((o) => o.optionId).join(', ')} 或序号 0-${options.length - 1}`,
+        };
+      }
+    }
+
+    // 执行回调
+    pending.resolve(finalOptionId);
+    session.pendingPermissions.delete(requestId);
+
+    logger.info({ sessionId, requestId, finalOptionId }, 'Permission resolved by user');
+    return { success: true, message: `已选择选项: ${finalOptionId}` };
   }
 
   getSession(userId: string): Session | undefined {

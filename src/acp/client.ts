@@ -3,7 +3,7 @@
  * 封装与本地 ACP Agent（如 opencode）的通信，管理子进程生命周期
  * 实现 Agent Client Protocol 标准，提供标准化的 AI Agent 接入能力
  */
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { Writable, Readable } from 'node:stream';
 import type { IMResponse } from '../types';
 import { createLogger } from '../utils/logger';
@@ -16,11 +16,24 @@ import type {
   ReadTextFileResponse,
   WriteTextFileRequest,
   WriteTextFileResponse,
+  CreateTerminalRequest,
+  CreateTerminalResponse,
+  TerminalOutputRequest,
+  TerminalOutputResponse,
+  WaitForTerminalExitRequest,
+  WaitForTerminalExitResponse,
+  ReleaseTerminalRequest,
+  ReleaseTerminalResponse,
+  KillTerminalCommandRequest,
+  KillTerminalCommandResponse,
   StopReason,
   Client,
 } from '@agentclientprotocol/sdk';
 
 const logger = createLogger('ACPClient');
+
+// 权限处理回调类型
+export type PermissionHandler = (params: RequestPermissionRequest) => Promise<string>;
 
 // 实现 ACP Client 接口
 class BatonClient implements Client {
@@ -29,8 +42,12 @@ class BatonClient implements Client {
     resolve: (value: string) => void;
     reject: (error: Error) => void;
   } | null = null;
+  private permissionHandler: PermissionHandler;
+  private terminals: Map<string, { process: ChildProcess; output: string[] }> = new Map();
 
-  constructor() {}
+  constructor(permissionHandler: PermissionHandler) {
+    this.permissionHandler = permissionHandler;
+  }
 
   // 处理会话更新（agent 发来的消息）
   async sessionUpdate(params: SessionNotification): Promise<void> {
@@ -52,40 +69,51 @@ class BatonClient implements Client {
         break;
 
       case 'plan': {
-        const planSummary = update.entries.map(e => e.content).join(', ');
-        logger.info(`[ACP] Plan: ${planSummary || 'Agent is planning...'}`);
+        const planSummary = update.entries
+          .map((e) => `[${e.status}] ${e.content}`)
+          .join('\n');
+        logger.info(`[ACP] Plan updated:\n${planSummary || 'Agent is planning...'}`);
         break;
       }
 
       case 'agent_thought_chunk':
-      case 'user_message_chunk':
-      case 'available_commands_update':
-      case 'current_mode_update':
-      case 'config_option_update':
-      case 'session_info_update':
-      case 'usage_update':
-        // 这些更新在 MVP 中忽略
-        break;
-
-      default:
-        break;
     }
   }
 
-  // 权限请求（MVP 直接允许）
+  // 权限请求（调用外部处理器）
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     logger.info(`[ACP] Permission requested: ${params.toolCall.title}`);
 
-    // MVP: 直接允许第一个选项
-    return {
-      outcome: {
-        outcome: 'selected',
-        optionId: params.options[0]?.optionId || 'allow',
-      },
-    };
+    // 调用外部回调，等待用户确认并选择选项
+    try {
+      const selectedOptionId = await this.permissionHandler(params);
+
+      // 验证选择的 ID 是否在选项列表中
+      const isValid = params.options.some((o) => o.optionId === selectedOptionId);
+
+      return {
+        outcome: {
+          outcome: 'selected',
+          optionId: isValid ? selectedOptionId : (params.options[0]?.optionId || 'deny'),
+        },
+      };
+    } catch (error: any) {
+      logger.error(error, 'Permission handler error');
+      // 默认选择第一个拒绝选项或 fallback
+      const fallbackOption =
+        params.options.find((o: any) => o.name.toLowerCase().includes('deny'))?.optionId ||
+        params.options[0]?.optionId ||
+        'deny';
+      return {
+        outcome: {
+          outcome: 'selected',
+          optionId: fallbackOption,
+        },
+      };
+    }
   }
 
-  // 文件读取
+  // 读取文件（受限访问）
   async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
@@ -117,6 +145,90 @@ class BatonClient implements Client {
 
     await fs.writeFile(resolvedPath, params.content, 'utf-8');
     return {};
+  }
+
+  // 终端支持：创建终端
+  async createTerminal(params: CreateTerminalRequest): Promise<CreateTerminalResponse> {
+    const terminalId = `term-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const commandStr = `${params.command} ${params.args?.join(' ') || ''}`.trim();
+
+    logger.info({ terminalId, command: commandStr }, 'Creating terminal');
+
+    const proc = spawn(params.command, params.args || [], {
+      cwd: params.cwd || process.cwd(),
+      env: { ...process.env, ...params.env } as NodeJS.ProcessEnv,
+      shell: true,
+    }) as any;
+
+    const terminalData = {
+      process: proc as ChildProcess,
+      output: [] as string[],
+    };
+
+    proc.stdout.on('data', (data: Buffer) => terminalData.output.push(data.toString()));
+    proc.stderr.on('data', (data: Buffer) => terminalData.output.push(data.toString()));
+
+    this.terminals.set(terminalId, terminalData);
+
+    return { terminalId };
+  }
+
+  // 获取终端输出
+  async terminalOutput(params: TerminalOutputRequest): Promise<TerminalOutputResponse> {
+    const terminal = this.terminals.get(params.terminalId);
+    if (!terminal) throw new Error('Terminal not found');
+
+    const output = terminal.output.join('');
+    terminal.output = []; // 模拟流，读取后清除
+
+    return {
+      output,
+      truncated: false,
+      exitStatus:
+        terminal.process.exitCode !== null ? { exitCode: terminal.process.exitCode } : undefined,
+    };
+  }
+
+  // 等待终端退出
+  async waitForTerminalExit(
+    params: WaitForTerminalExitRequest
+  ): Promise<WaitForTerminalExitResponse> {
+    const terminal = this.terminals.get(params.terminalId);
+    if (!terminal) throw new Error('Terminal not found');
+
+    return new Promise((resolve) => {
+      if (terminal.process.exitCode !== null) {
+        resolve({
+          exitCode: terminal.process.exitCode,
+        });
+      } else {
+        terminal.process.on('exit', (code, signal) => {
+          resolve({
+            exitCode: code ?? undefined,
+            signal: signal ?? undefined,
+          });
+        });
+      }
+    });
+  }
+
+  // 释放终端
+  async releaseTerminal(params: ReleaseTerminalRequest): Promise<void> {
+    const terminal = this.terminals.get(params.terminalId);
+    if (terminal) {
+      if (terminal.process.exitCode === null) {
+        terminal.process.kill();
+      }
+      this.terminals.delete(params.terminalId);
+    }
+  }
+
+  // 强杀终端命令
+  async killTerminal(params: KillTerminalCommandRequest): Promise<void> {
+    const terminal = this.terminals.get(params.terminalId);
+    if (terminal && terminal.process.exitCode === null) {
+      terminal.process.kill('SIGTERM');
+    }
   }
 
   // 等待完整响应
@@ -156,14 +268,14 @@ class BatonClient implements Client {
 
 export class ACPClient {
   private projectPath: string;
+  private agentProcess: any = null;
   private connection: acp.ClientSideConnection | null = null;
   private batonClient: BatonClient;
-  private agentProcess: ReturnType<typeof spawn> | null = null;
   private currentSessionId: string | null = null;
 
-  constructor(projectPath: string) {
+  constructor(projectPath: string, permissionHandler: PermissionHandler) {
     this.projectPath = projectPath;
-    this.batonClient = new BatonClient();
+    this.batonClient = new BatonClient(permissionHandler);
   }
 
   async startAgent(): Promise<void> {
@@ -199,6 +311,7 @@ export class ACPClient {
           readTextFile: true,
           writeTextFile: true,
         },
+        terminal: true,
       },
     });
 

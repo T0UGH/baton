@@ -60,8 +60,28 @@ describe('Baton MVP Tests', () => {
     });
 
     it('should parse /stop command', async () => {
+      // 先发送一个 prompt 确保 session 存在
+      await mockClient.sendMessage('Running task...');
       const response = await mockClient.sendMessage('/stop');
       assert.strictEqual(response.success, true);
+    });
+
+    it('should parse /repo command', async () => {
+      const response = await mockClient.sendMessage('/repo');
+      assert.strictEqual(response.success, true);
+      assert.ok(response.message.includes('当前项目'));
+    });
+
+    it('should parse /reset command', async () => {
+      const response = await mockClient.sendMessage('/reset');
+      assert.strictEqual(response.success, true);
+      assert.ok(response.message.includes('reset'));
+    });
+
+    it('should parse /mode command', async () => {
+      const response = await mockClient.sendMessage('/mode plan');
+      assert.strictEqual(response.success, true);
+      assert.ok(response.message.includes('plan'));
     });
 
     it('should treat regular text as prompt', async () => {
