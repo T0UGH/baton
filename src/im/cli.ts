@@ -145,7 +145,11 @@ export class CLIAdapter extends BaseIMAdapter {
     return 'cli-msg-' + Date.now();
   }
 
-  async sendReply(chatId: string, messageId: string | undefined, message: IMMessageFormat): Promise<string> {
+  async sendReply(
+    chatId: string,
+    messageId: string | undefined,
+    message: IMMessageFormat
+  ): Promise<string> {
     // CLI 中 reply 和 sendMessage 相同
     return await this.sendMessage(chatId, message);
   }

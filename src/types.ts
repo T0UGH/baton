@@ -5,6 +5,7 @@
  */
 
 import type { ACPClient } from './acp/client';
+import type { RequestPermissionRequest, SessionMode, ModelInfo } from '@agentclientprotocol/sdk';
 
 export interface Session {
   id: string;
@@ -13,12 +14,19 @@ export interface Session {
   acpClient: ACPClient | null;
   queue: TaskQueue;
   isProcessing: boolean;
-  pendingPermissions: Map<string, {
-    resolve: (value: string) => void;
-    reject: (reason?: any) => void;
-    timestamp: number;
-    request: any; // 存储原始请求以获取选项列表
-  }>;
+  availableModes: SessionMode[];
+  currentModeId?: string;
+  availableModels: ModelInfo[];
+  currentModelId?: string;
+  pendingPermissions: Map<
+    string,
+    {
+      resolve: (value: string) => void;
+      reject: (reason?: any) => void;
+      timestamp: number;
+      request: RequestPermissionRequest; // 存储原始请求以获取选项列表
+    }
+  >;
 }
 
 export interface Task {
@@ -52,6 +60,7 @@ export type CommandType =
   | 'stop'
   | 'reset'
   | 'mode'
+  | 'model'
   | 'help'
   | 'prompt'
   | 'select';

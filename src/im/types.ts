@@ -19,7 +19,8 @@ export interface CardAction {
   text: string;
   style: 'primary' | 'danger' | 'default';
   value: string; // 回传给回调的数据
-  confirm?: {    // 二次确认弹窗
+  confirm?: {
+    // 二次确认弹窗
     title: string;
     content: string;
   };

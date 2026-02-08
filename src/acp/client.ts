@@ -3,8 +3,10 @@
  * 封装与本地 ACP Agent（如 opencode）的通信，管理子进程生命周期
  * 实现 Agent Client Protocol 标准，提供标准化的 AI Agent 接入能力
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { Writable, Readable } from 'node:stream';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type { IMResponse } from '../types';
 import { createLogger } from '../utils/logger';
 import * as acp from '@agentclientprotocol/sdk';
@@ -12,10 +14,6 @@ import type {
   SessionNotification,
   RequestPermissionRequest,
   RequestPermissionResponse,
-  ReadTextFileRequest,
-  ReadTextFileResponse,
-  WriteTextFileRequest,
-  WriteTextFileResponse,
   CreateTerminalRequest,
   CreateTerminalResponse,
   TerminalOutputRequest,
@@ -23,17 +21,23 @@ import type {
   WaitForTerminalExitRequest,
   WaitForTerminalExitResponse,
   ReleaseTerminalRequest,
-  ReleaseTerminalResponse,
   KillTerminalCommandRequest,
-  KillTerminalCommandResponse,
   StopReason,
   Client,
+  PermissionOption,
+  SessionMode,
+  ModelInfo,
 } from '@agentclientprotocol/sdk';
 
 const logger = createLogger('ACPClient');
 
 // 权限处理回调类型
 export type PermissionHandler = (params: RequestPermissionRequest) => Promise<string>;
+
+/**
+ * 扩展的 ACP 会话状态
+ * 包含处于 ACP 标准扩展阶段的模型信息
+ */
 
 // 实现 ACP Client 接口
 class BatonClient implements Client {
@@ -43,7 +47,14 @@ class BatonClient implements Client {
     reject: (error: Error) => void;
   } | null = null;
   private permissionHandler: PermissionHandler;
-  private terminals: Map<string, { process: ChildProcess; output: string[] }> = new Map();
+  private terminals: Map<string, { process: ChildProcessWithoutNullStreams; output: string[] }> =
+    new Map();
+
+  // 状态跟踪
+  public availableModes: SessionMode[] = [];
+  public currentModeId?: string;
+  public availableModels: ModelInfo[] = [];
+  public currentModelId?: string;
 
   constructor(permissionHandler: PermissionHandler) {
     this.permissionHandler = permissionHandler;
@@ -69,14 +80,27 @@ class BatonClient implements Client {
         break;
 
       case 'plan': {
-        const planSummary = update.entries
-          .map((e) => `[${e.status}] ${e.content}`)
-          .join('\n');
+        const planSummary = update.entries.map(e => `[${e.status}] ${e.content}`).join('\n');
         logger.info(`[ACP] Plan updated:\n${planSummary || 'Agent is planning...'}`);
         break;
       }
 
+      case 'current_mode_update':
+        this.currentModeId = update.currentModeId;
+        logger.info(`[ACP] Mode updated to: ${update.currentModeId}`);
+        break;
+
       case 'agent_thought_chunk':
+      case 'user_message_chunk':
+      case 'available_commands_update':
+      case 'config_option_update':
+      case 'session_info_update':
+      case 'usage_update':
+        // 这些更新在 MVP 中忽略
+        break;
+
+      default:
+        break;
     }
   }
 
@@ -89,19 +113,20 @@ class BatonClient implements Client {
       const selectedOptionId = await this.permissionHandler(params);
 
       // 验证选择的 ID 是否在选项列表中
-      const isValid = params.options.some((o) => o.optionId === selectedOptionId);
+      const isValid = params.options.some(o => o.optionId === selectedOptionId);
 
       return {
         outcome: {
           outcome: 'selected',
-          optionId: isValid ? selectedOptionId : (params.options[0]?.optionId || 'deny'),
+          optionId: isValid ? selectedOptionId : params.options[0]?.optionId || 'deny',
         },
       };
-    } catch (error: any) {
-      logger.error(error, 'Permission handler error');
+    } catch (error: unknown) {
+      logger.error(error as Error, 'Permission handler error');
       // 默认选择第一个拒绝选项或 fallback
       const fallbackOption =
-        params.options.find((o: any) => o.name.toLowerCase().includes('deny'))?.optionId ||
+        params.options.find((o: PermissionOption) => o.name.toLowerCase().includes('deny'))
+          ?.optionId ||
         params.options[0]?.optionId ||
         'deny';
       return {
@@ -114,12 +139,10 @@ class BatonClient implements Client {
   }
 
   // 读取文件（受限访问）
-  async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-
+  async readTextFile(params: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
+    const targetPath = String(params.path);
     // 路径安全检查
-    const resolvedPath = path.resolve(params.path);
+    const resolvedPath = path.resolve(targetPath);
     const projectRoot = process.cwd();
 
     if (!resolvedPath.startsWith(projectRoot)) {
@@ -131,19 +154,18 @@ class BatonClient implements Client {
   }
 
   // 文件写入
-  async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-
+  async writeTextFile(params: acp.WriteTextFileRequest): Promise<acp.WriteTextFileResponse> {
+    const targetPath = String(params.path);
+    const content = String(params.content);
     // 路径安全检查
-    const resolvedPath = path.resolve(params.path);
+    const resolvedPath = path.resolve(targetPath);
     const projectRoot = process.cwd();
 
     if (!resolvedPath.startsWith(projectRoot)) {
       throw new Error('Access denied: path outside project root');
     }
 
-    await fs.writeFile(resolvedPath, params.content, 'utf-8');
+    await fs.writeFile(resolvedPath, content, 'utf-8');
     return {};
   }
 
@@ -154,14 +176,19 @@ class BatonClient implements Client {
 
     logger.info({ terminalId, command: commandStr }, 'Creating terminal');
 
+    const spawnEnv: NodeJS.ProcessEnv = { ...process.env };
+    if (params.env) {
+      Object.assign(spawnEnv, params.env);
+    }
+
     const proc = spawn(params.command, params.args || [], {
       cwd: params.cwd || process.cwd(),
-      env: { ...process.env, ...params.env } as NodeJS.ProcessEnv,
+      env: spawnEnv,
       shell: true,
-    }) as any;
+    });
 
     const terminalData = {
-      process: proc as ChildProcess,
+      process: proc,
       output: [] as string[],
     };
 
@@ -196,7 +223,7 @@ class BatonClient implements Client {
     const terminal = this.terminals.get(params.terminalId);
     if (!terminal) throw new Error('Terminal not found');
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       if (terminal.process.exitCode !== null) {
         resolve({
           exitCode: terminal.process.exitCode,
@@ -268,7 +295,7 @@ class BatonClient implements Client {
 
 export class ACPClient {
   private projectPath: string;
-  private agentProcess: any = null;
+  private agentProcess: ChildProcessWithoutNullStreams | null = null;
   private connection: acp.ClientSideConnection | null = null;
   private batonClient: BatonClient;
   private currentSessionId: string | null = null;
@@ -284,16 +311,22 @@ export class ACPClient {
     // 启动 opencode acp 进程
     this.agentProcess = spawn('opencode', ['acp'], {
       cwd: this.projectPath,
-      stdio: ['pipe', 'pipe', 'inherit'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    const pid = this.agentProcess.pid!;
+    if (!this.agentProcess.pid) {
+      throw new Error('Failed to start agent process');
+    }
+    const pid = this.agentProcess.pid;
     logger.info(`[ACP] Agent started with PID: ${pid}`);
 
     // 创建流
-    const input = Writable.toWeb(this.agentProcess.stdin!) as unknown as WritableStream<Uint8Array>;
+    if (!this.agentProcess.stdin || !this.agentProcess.stdout) {
+      throw new Error('Failed to initialize agent streams');
+    }
+    const input = Writable.toWeb(this.agentProcess.stdin) as unknown as WritableStream<Uint8Array>;
     const output = Readable.toWeb(
-      this.agentProcess.stdout!
+      this.agentProcess.stdout
     ) as unknown as ReadableStream<Uint8Array>;
 
     // 创建 ACP 流
@@ -324,7 +357,19 @@ export class ACPClient {
       mcpServers: [],
     });
 
-    this.currentSessionId = sessionResult.sessionId;
+    const sessionResultWithSessionId = sessionResult as { sessionId: string };
+    this.currentSessionId = sessionResultWithSessionId.sessionId;
+
+    // 捕获初始模式和模型
+    if (sessionResult.modes) {
+      this.batonClient.availableModes = sessionResult.modes.availableModes;
+      this.batonClient.currentModeId = sessionResult.modes.currentModeId;
+    }
+    if (sessionResult.models) {
+      this.batonClient.availableModels = sessionResult.models.availableModels;
+      this.batonClient.currentModelId = sessionResult.models.currentModelId;
+    }
+
     logger.info(`[ACP] Session created: ${sessionResult.sessionId}`);
   }
 
@@ -396,5 +441,60 @@ export class ACPClient {
     if (this.batonClient) {
       this.batonClient.onPromptComplete('cancelled');
     }
+  }
+
+  // 获取模式/模型状态
+  getModeState() {
+    return {
+      availableModes: this.batonClient.availableModes,
+      currentModeId: this.batonClient.currentModeId,
+    };
+  }
+
+  getModelState() {
+    return {
+      availableModels: this.batonClient.availableModels,
+      currentModelId: this.batonClient.currentModelId,
+    };
+  }
+
+  // 设置模式/模型
+  async setMode(modeId: string): Promise<IMResponse> {
+    if (!this.connection || !this.currentSessionId) throw new Error('Not connected');
+
+    await this.connection.setSessionMode({
+      sessionId: this.currentSessionId,
+      modeId,
+    });
+
+    return { success: true, message: `模式已切换为: ${modeId}` };
+  }
+
+  async setModel(modelId: string): Promise<IMResponse> {
+    if (!this.connection || !this.currentSessionId) throw new Error('Not connected');
+
+    // 检查连接是否支持 setSessionModel 方法
+    if (
+      'setSessionModel' in this.connection &&
+      typeof this.connection.setSessionModel === 'function'
+    ) {
+      await this.connection.setSessionModel({
+        sessionId: this.currentSessionId,
+        modelId,
+      });
+    } else {
+      // 如果没有标准方法，尝试使用通用 execute 方法
+      const conn = this.connection as any;
+      if (conn.execute) {
+        await conn.execute('session/setModel', {
+          sessionId: this.currentSessionId,
+          modelId,
+        });
+      } else {
+        throw new Error('setSessionModel not supported by connection');
+      }
+    }
+
+    return { success: true, message: `模型已切换为: ${modelId}` };
   }
 }

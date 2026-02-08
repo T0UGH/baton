@@ -20,7 +20,6 @@ export class CommandDispatcher {
     const trimmed = text.trim();
 
     // System Meta Commands (优先级最高)
-    // System Meta Commands (优先级最高)
     if (trimmed.startsWith('/repo')) {
       return { type: 'repo', args: trimmed.split(' ').slice(1), raw: trimmed };
     }
@@ -33,6 +32,9 @@ export class CommandDispatcher {
     if (trimmed.startsWith('/reset')) {
       return { type: 'reset', args: [], raw: trimmed };
     }
+    if (trimmed.startsWith('/model')) {
+      return { type: 'model', args: trimmed.split(' ').slice(1), raw: trimmed };
+    }
     if (trimmed.startsWith('/mode')) {
       return { type: 'mode', args: trimmed.split(' ').slice(1), raw: trimmed };
     }
@@ -42,7 +44,7 @@ export class CommandDispatcher {
     if (trimmed.startsWith('/select')) {
       return { type: 'select', args: trimmed.split(' ').slice(1), raw: trimmed };
     }
-    
+
     // Agent Passthrough (其他以 / 开头的)
     return { type: 'prompt', args: [trimmed], raw: trimmed };
   }
@@ -51,13 +53,25 @@ export class CommandDispatcher {
     const trimmed = message.text.trim();
     const command = this.parseCommand(message.text);
 
-    // 💡 优化交互：如果当前有待处理的权限请求，且输入是纯数字，则视为选择选项
-    if (/^\d+$/.test(trimmed)) {
-      const session = await this.sessionManager.getOrCreateSession(message.userId);
-      if (session.pendingPermissions.size > 0) {
+    // 💡 优化交互：如果当前有待处理的权限请求
+    const session = await this.sessionManager.getOrCreateSession(message.userId);
+    if (session.pendingPermissions.size > 0) {
+      // 如果输入是纯数字，则视为选择选项
+      if (/^\d+$/.test(trimmed)) {
+        // 取第一个挂起的请求
         const requestId = Array.from(session.pendingPermissions.keys())[0];
-        console.log(`[Dispatcher] Numeric input detected during pending permission. Treating as selection.`);
+        console.log(
+          `[Dispatcher] Numeric input detected during pending permission. Treating as selection.`
+        );
         return this.sessionManager.resolvePermission(session.id, requestId, trimmed);
+      } else if (command.type === 'mode' || command.type === 'model') {
+        // 如果是 mode 或 model 命令，提醒用户先处理当前权限请求
+        console.log(`[Dispatcher] Mode/Model command detected during pending permission.`);
+        return {
+          success: false,
+          message:
+            '当前已有待处理的权限请求，请先处理完当前请求再试。\n请使用数字序号回复或点击 IM 卡片进行选择。',
+        };
       }
     }
 
@@ -80,6 +94,9 @@ export class CommandDispatcher {
 
       case 'mode':
         return this.handleMode(message, command);
+
+      case 'model':
+        return this.handleModel(message, command);
 
       case 'help':
         return this.handleHelp();
@@ -128,12 +145,32 @@ export class CommandDispatcher {
     return this.sessionManager.resetSession(message.userId);
   }
 
-  private handleMode(_message: IMMessage, command: ParsedCommand): IMResponse {
-    const mode = command.args[0] || 'default';
-    return {
-      success: true,
-      message: `已切换到 ${mode} 模式\n\n(注：模式切换功能将在后续版本完善)`,
-    };
+  private async handleMode(message: IMMessage, command: ParsedCommand): Promise<IMResponse> {
+    const mode = command.args[0];
+    if (mode) {
+      // 直接切换
+      const session = await this.sessionManager.getOrCreateSession(message.userId);
+      if (session.acpClient) {
+        return session.acpClient.setMode(mode);
+      }
+      return { success: false, message: 'Agent 未启动' };
+    }
+    // 触发选择界面
+    return this.sessionManager.triggerModeSelection(message.userId);
+  }
+
+  private async handleModel(message: IMMessage, command: ParsedCommand): Promise<IMResponse> {
+    const model = command.args[0];
+    if (model) {
+      // 直接切换
+      const session = await this.sessionManager.getOrCreateSession(message.userId);
+      if (session.acpClient) {
+        return session.acpClient.setModel(model);
+      }
+      return { success: false, message: 'Agent 未启动' };
+    }
+    // 触发选择界面
+    return this.sessionManager.triggerModelSelection(message.userId);
   }
 
   private handleHelp(): IMResponse {
@@ -144,7 +181,8 @@ export class CommandDispatcher {
 - /current - 查看当前会话状态
 - /stop [id/all] - 停止当前任务或清空队列
 - /reset - 重置会话（清除上下文）
-- /mode [name] - 切换 Agent 模式
+- /mode [name] - 查看或切换 Agent 模式
+- /model [name] - 查看或切换 AI 模型
 - /select <reqId> <optId/index> - 选择权限请求选项
 - /help - 显示此帮助
 
@@ -153,7 +191,7 @@ export class CommandDispatcher {
 - 所有非指令文本都会转发给 Agent
 
 *权限说明：*
-- 敏感操作需用户确认，请使用 /select 指令或 IM 卡片进行交互
+- 敏感操作需用户确认，请使用数字序号回复或 IM 卡片进行交互
     `.trim();
 
     return {
@@ -169,13 +207,13 @@ export class CommandDispatcher {
     // 💡 隐式取消逻辑：如果当前有待处理的权限请求，说明用户可能想改需求
     // 发送新指令会自动取消当前的权限请求和任务
     if (session.pendingPermissions.size > 0) {
-      console.log(`[Dispatcher] User sent new instruction while permission pending. Cancelling current task...`);
-      await this.sessionManager.stopTask(message.userId); // 这会调用 acpClient.cancelCurrentTask()
-      // 注意：stopTask 会清空 queue.current，并调用 cancelCurrentTask
-      // 待权限请求会在 stopTask 链条中由于 agent 退出/任务终止而被清理吗？
-      // 我们最好显式清理一下
+      console.log(
+        `[Dispatcher] User sent new instruction while permission pending. Cancelling current task...`
+      );
+      await this.sessionManager.stopTask(message.userId);
+      // 显式清理挂起的请求
       for (const [requestId] of session.pendingPermissions) {
-        this.sessionManager.resolvePermission(session.id, requestId, 'cancel'); // 假定 'cancel' 是一种通用拒绝
+        this.sessionManager.resolvePermission(session.id, requestId, 'cancel');
       }
     }
 

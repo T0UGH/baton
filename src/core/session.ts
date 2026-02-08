@@ -7,7 +7,7 @@ import type { Session, IMResponse } from '../types';
 import { ACPClient } from '../acp/client';
 import { createLogger } from '../utils/logger';
 import { EventEmitter } from 'node:events';
-import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
+import type { RequestPermissionRequest, PermissionOption } from '@agentclientprotocol/sdk';
 
 const logger = createLogger('SessionManager');
 
@@ -47,6 +47,8 @@ export class SessionManager extends EventEmitter {
           current: null,
         },
         isProcessing: false,
+        availableModes: [],
+        availableModels: [],
         pendingPermissions: new Map(),
       };
       sessions.set(sessionKey, session);
@@ -92,9 +94,8 @@ export class SessionManager extends EventEmitter {
               // 默认拒绝：查找是否有 deny/cancel 选项，没有则选第一个
               const fallbackOption =
                 req.options.find(
-                  (o: any) =>
-                    o.name.toLowerCase().includes('deny') ||
-                    o.name.toLowerCase().includes('cancel')
+                  (o: PermissionOption) =>
+                    o.name.toLowerCase().includes('deny') || o.name.toLowerCase().includes('cancel')
                 )?.optionId ||
                 req.options[0]?.optionId ||
                 'deny';
@@ -109,6 +110,14 @@ export class SessionManager extends EventEmitter {
       const acpClient = new ACPClient(this.projectPath, permissionHandler);
       await acpClient.startAgent();
       session.acpClient = acpClient;
+
+      // 同步初始状态
+      const modeState = acpClient.getModeState();
+      const modelState = acpClient.getModelState();
+      session.availableModes = modeState.availableModes;
+      session.currentModeId = modeState.currentModeId;
+      session.availableModels = modelState.availableModels;
+      session.currentModelId = modelState.currentModelId;
     }
 
     return session;
@@ -135,7 +144,7 @@ export class SessionManager extends EventEmitter {
     }
 
     let finalOptionId = optionIdOrIndex;
-    const options = pending.request.options as any[];
+    const options = pending.request.options;
 
     // 检查是否是序号
     const index = parseInt(optionIdOrIndex, 10);
@@ -143,11 +152,11 @@ export class SessionManager extends EventEmitter {
       finalOptionId = options[index].optionId;
     } else {
       // 检查 optionId 是否存在
-      const exists = options.some((o) => o.optionId === optionIdOrIndex);
+      const exists = options.some(o => o.optionId === optionIdOrIndex);
       if (!exists) {
         return {
           success: false,
-          message: `无效的选项: ${optionIdOrIndex}。可选: ${options.map((o) => o.optionId).join(', ')} 或序号 0-${options.length - 1}`,
+          message: `无效的选项: ${optionIdOrIndex}。可选: ${options.map(o => o.optionId).join(', ')} 或序号 0-${options.length - 1}`,
         };
       }
     }
@@ -260,5 +269,117 @@ export class SessionManager extends EventEmitter {
       success: true,
       message: 'No running task to stop.',
     };
+  }
+
+  // 触发模式选择
+  async triggerModeSelection(userId: string): Promise<IMResponse> {
+    const session = await this.getOrCreateSession(userId);
+
+    // 检查是否已有待处理的权限请求
+    if (session.pendingPermissions.size > 0) {
+      return {
+        success: false,
+        message: '当前已有待处理的权限请求，请先处理完当前请求再试',
+      };
+    }
+
+    const state = session.acpClient?.getModeState();
+
+    if (!state || state.availableModes.length === 0) {
+      return { success: false, message: '当前 Agent 不支持模式切换' };
+    }
+
+    // 构建一个模拟的权限请求来复用选择逻辑
+    const fakeReq: RequestPermissionRequest = {
+      sessionId: session.id,
+      toolCall: {
+        title: `切换模式 (当前: ${state.currentModeId || '未知'})`,
+        toolCallId: 'internal',
+      },
+      options: state.availableModes.map(m => ({
+        optionId: m.id,
+        name: m.name || m.id,
+        kind: 'allow_once',
+      })),
+    };
+
+    return new Promise(resolve => {
+      const requestId = generateUUID();
+      session.pendingPermissions.set(requestId, {
+        resolve: async optionId => {
+          if (session.acpClient) {
+            const res = await session.acpClient.setMode(optionId);
+            session.currentModeId = optionId;
+            resolve(res);
+          }
+        },
+        reject: () => resolve({ success: false, message: '已取消' }),
+        timestamp: Date.now(),
+        request: fakeReq,
+      });
+
+      this.emit('permissionRequest', {
+        sessionId: session.id,
+        requestId,
+        userId: session.userId,
+        request: fakeReq,
+      });
+    });
+  }
+
+  // 触发模型选择
+  async triggerModelSelection(userId: string): Promise<IMResponse> {
+    const session = await this.getOrCreateSession(userId);
+
+    // 检查是否已有待处理的权限请求
+    if (session.pendingPermissions.size > 0) {
+      return {
+        success: false,
+        message: '当前已有待处理的权限请求，请先处理完当前请求再试',
+      };
+    }
+
+    const state = session.acpClient?.getModelState();
+
+    if (!state || state.availableModels.length === 0) {
+      return { success: false, message: '当前 Agent 不支持模型切换' };
+    }
+
+    // 构建一个模拟的权限请求来复用选择逻辑
+    const fakeReq: RequestPermissionRequest = {
+      sessionId: session.id,
+      toolCall: {
+        title: `切换模型 (当前: ${state.currentModelId || '未知'})`,
+        toolCallId: 'internal',
+      },
+      options: state.availableModels.map(m => ({
+        optionId: m.modelId,
+        name: m.name || m.modelId,
+        kind: 'allow_once',
+      })),
+    };
+
+    return new Promise(resolve => {
+      const requestId = generateUUID();
+      session.pendingPermissions.set(requestId, {
+        resolve: async optionId => {
+          if (session.acpClient) {
+            const res = await session.acpClient.setModel(optionId);
+            session.currentModelId = optionId;
+            resolve(res);
+          }
+        },
+        reject: () => resolve({ success: false, message: '已取消' }),
+        timestamp: Date.now(),
+        request: fakeReq,
+      });
+
+      this.emit('permissionRequest', {
+        sessionId: session.id,
+        requestId,
+        userId: session.userId,
+        request: fakeReq,
+      });
+    });
   }
 }

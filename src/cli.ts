@@ -8,15 +8,20 @@ import { CommandDispatcher } from './core/dispatcher';
 import { SessionManager } from './core/session';
 import { TaskQueueEngine } from './core/queue';
 import type { IMMessage, IMResponse, Session } from './types';
-import { createLogger } from './utils/logger';
+import type { PermissionOption, RequestPermissionRequest } from '@agentclientprotocol/sdk';
 
-const logger = createLogger('CLI');
 const projectPath = process.cwd();
 
 console.log('╔════════════════════════════════════════╗');
 console.log('║           Baton CLI v0.1.0             ║');
 console.log('╚════════════════════════════════════════╝');
 console.log(`\nProject: ${projectPath}\n`);
+
+// 权限请求事件类型
+interface PermissionRequestEvent {
+  requestId: string;
+  request: RequestPermissionRequest;
+}
 
 // 模拟 IM 消息循环
 export async function main() {
@@ -30,32 +35,35 @@ export async function main() {
   const sessionManager = new SessionManager(projectPath);
 
   // 监听权限请求
-  sessionManager.on('permissionRequest', (event) => {
+  sessionManager.on('permissionRequest', (event: PermissionRequestEvent) => {
     const { requestId, request } = event;
     const toolCall = request.toolCall;
-    const options = request.options as any[];
-    
+    const options = request.options;
+
     console.log('\n' + '🔐'.repeat(10) + ' 权限确认 ' + '🔐'.repeat(10));
     console.log(`操作：${toolCall.title}`);
-    
+
     if (toolCall.rawInput) {
-      const details = typeof toolCall.rawInput === 'string' 
-        ? toolCall.rawInput 
-        : JSON.stringify(toolCall.rawInput, null, 2);
+      const details =
+        typeof toolCall.rawInput === 'string'
+          ? toolCall.rawInput
+          : JSON.stringify(toolCall.rawInput, null, 2);
       console.log(`细节：\n${details}`);
     }
 
     console.log('请选择：');
-    options.forEach((opt, index) => {
+    options.forEach((opt: PermissionOption, index: number) => {
       console.log(`${index}. ${opt.name}（${opt.optionId}）`);
     });
-    
+
     console.log(`\n回复数字 0..${options.length - 1} 选择。`);
-    console.log(`如果你想改需求/发送新指令，直接输入内容即可（会自动取消本次权限确认并按新任务处理）。`);
+    console.log(
+      `如果你想改需求/发送新指令，直接输入内容即可（会自动取消本次权限确认并按新任务处理）。`
+    );
     console.log(`停止任务请发送 /stop。`);
     console.log('🆔 Request ID: ' + requestId); // 保留 ID 供参考
     console.log('─'.repeat(30) + '\n');
-    
+
     process.stdout.write('> '); // 恢复提示符
   });
 
@@ -140,4 +148,4 @@ export async function main() {
   }
 }
 
-main().catch((err) => console.error(err));
+main().catch((err: Error) => console.error(err));

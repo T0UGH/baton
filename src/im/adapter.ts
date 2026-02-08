@@ -11,7 +11,6 @@ import type { UniversalCard } from './types.js';
 export { IMPlatform };
 export type { UniversalCard };
 
-
 /**
  * IM 回复选项
  */
@@ -77,7 +76,11 @@ export interface IMAdapter {
    * @param message 消息内容
    * @returns 消息 ID
    */
-  sendReply(_chatId: string, _messageId: string | undefined, message: IMMessageFormat): Promise<string>;
+  sendReply(
+    _chatId: string,
+    _messageId: string | undefined,
+    message: IMMessageFormat
+  ): Promise<string>;
 
   /**
    * 更新消息（用于流式响应或编辑消息）
@@ -131,7 +134,11 @@ export abstract class BaseIMAdapter implements IMAdapter {
     options?: IMReplyOptions
   ): Promise<string>;
 
-  abstract sendReply(_chatId: string, _messageId: string | undefined, message: IMMessageFormat): Promise<string>;
+  abstract sendReply(
+    _chatId: string,
+    _messageId: string | undefined,
+    message: IMMessageFormat
+  ): Promise<string>;
 
   abstract onTaskComplete(session: Session, response: IMResponse): Promise<void>;
 

@@ -53,6 +53,9 @@ export class FeishuAdapter extends BaseIMAdapter {
   private messageContext: Map<string, { chatId: string; messageId: string }> = new Map();
   // 存储 sessionContext 用于权限请求反查 userId
   private sessionContext: Map<string, { userId: string }> = new Map();
+  // 用于防止重复处理消息
+  private processedMessages: Map<string, number> = new Map();
+  private messageTTL: number = 30000; // 30秒内认为是重复消息
 
   constructor(config: BatonConfig) {
     super();
@@ -75,9 +78,9 @@ export class FeishuAdapter extends BaseIMAdapter {
       config.project.path,
       config.feishu.card?.permissionTimeout
     );
-    
+
     // 监听权限请求事件
-    this.sessionManager.on('permissionRequest', async (event) => {
+    this.sessionManager.on('permissionRequest', async event => {
       await this.handlePermissionRequest(event);
     });
 
@@ -123,7 +126,7 @@ export class FeishuAdapter extends BaseIMAdapter {
       },
     });
   }
-  
+
   // 处理权限请求，发送交互卡片
   private async handlePermissionRequest(event: any): Promise<void> {
     const { sessionId, requestId, request } = event;
@@ -165,12 +168,11 @@ export class FeishuAdapter extends BaseIMAdapter {
 
     elements.push({
       type: 'markdown',
-      content:
-        '*💡 提示：输入新指令可自动取消本次请求并开始新任务。发送 /stop 可终止任务。*',
+      content: '*💡 提示：输入新指令可自动取消本次请求并开始新任务。发送 /stop 可终止任务。*',
     });
 
     // 构建动态按钮
-    const actions = options.map((opt) => ({
+    const actions = options.map(opt => ({
       id: `permission_${opt.optionId}`,
       text: opt.name,
       style:
@@ -216,6 +218,24 @@ export class FeishuAdapter extends BaseIMAdapter {
       if (!message || !sender) {
         logger.warn({ data }, 'Invalid message data');
         return;
+      }
+
+      // 检查是否为重复消息
+      if (message.message_id) {
+        const now = Date.now();
+        const previousTimestamp = this.processedMessages.get(message.message_id);
+
+        // 如果消息在 TTL 时间内已经被处理过，则跳过
+        if (previousTimestamp && now - previousTimestamp < this.messageTTL) {
+          logger.debug({ message_id: message.message_id }, 'Skipping duplicate message');
+          return;
+        }
+
+        // 记录消息处理时间
+        this.processedMessages.set(message.message_id, now);
+
+        // 清理过期的消息记录
+        this.cleanupProcessedMessages(now);
       }
 
       // 调试：打印关键字段
@@ -290,15 +310,15 @@ export class FeishuAdapter extends BaseIMAdapter {
 
   private async handleCardAction(data: any): Promise<void> {
     logger.info({ action: data.action }, 'Card action received');
-    
+
     try {
       const actionValue = data.action.value;
       // 飞书 action.value 可能是对象也可能是字符串，这里我们之前 JSON.stringify 了
       let payload: any;
-      
+
       // 尝试解析 payload
       if (typeof actionValue === 'object') {
-          payload = actionValue;
+        payload = actionValue;
       } else {
         try {
           payload = JSON.parse(actionValue);
@@ -307,7 +327,7 @@ export class FeishuAdapter extends BaseIMAdapter {
           return;
         }
       }
-      
+
       // 检查是否是权限处理动作
       if (payload.action === 'resolve_permission') {
         const { session_id, request_id, option_id } = payload;
@@ -370,7 +390,10 @@ export class FeishuAdapter extends BaseIMAdapter {
     });
 
     const newMessageId = res.data?.message_id || '';
-    logger.debug({ chatId, messageType: this.getMessageType(message), newMessageId }, 'Message sent');
+    logger.debug(
+      { chatId, messageType: this.getMessageType(message), newMessageId },
+      'Message sent'
+    );
     return newMessageId;
   }
 
@@ -521,5 +544,14 @@ export class FeishuAdapter extends BaseIMAdapter {
   // 获取飞书客户端实例（用于高级操作）
   getClient(): lark.Client {
     return this.client;
+  }
+
+  // 清理过期的消息记录
+  private cleanupProcessedMessages(currentTime: number): void {
+    for (const [messageId, timestamp] of this.processedMessages.entries()) {
+      if (currentTime - timestamp >= this.messageTTL) {
+        this.processedMessages.delete(messageId);
+      }
+    }
   }
 }

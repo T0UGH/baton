@@ -5,7 +5,7 @@ import type { UniversalCard, CardElement, CardAction } from '../types';
  * 文档: https://open.feishu.cn/document/ukTMukTMukTM/uEjNwYjLxYDM24SM2AjN
  */
 export function convertToFeishuCard(card: UniversalCard): any {
-  const feishuCard = {
+  const feishuCard: any = {
     config: {
       wide_screen_mode: true,
     },
@@ -49,7 +49,7 @@ function convertElement(element: CardElement): any {
           content: element.content,
         },
       };
-    
+
     case 'text':
       return {
         tag: 'div',
@@ -66,8 +66,7 @@ function convertElement(element: CardElement): any {
           is_short: true, // 默认都展示为短字段
           text: {
             tag: 'lark_md',
-            content: `**${field.title}**
-${field.content}`,
+            content: `**${field.title}**\n${field.content}`,
           },
         })),
       };
@@ -87,19 +86,20 @@ function convertAction(action: CardAction): any {
     type: mapButtonStyle(action.style),
     value: {
       action_id: action.id, // 飞书回传的 action_id (注意：飞书通常放在 value 字典里)
-      value: action.value,  // 实际数据
+      value: action.value, // 实际数据
     },
   };
 
   if (action.confirm) {
+    const confirmAction = action as any;
     button.confirm = {
       title: {
         tag: 'plain_text',
-        content: action.confirm.title,
+        content: confirmAction.confirm.title,
       },
       text: {
         tag: 'plain_text',
-        content: action.confirm.content,
+        content: confirmAction.confirm.content,
       },
     };
   }

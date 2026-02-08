@@ -38,4 +38,4 @@ async function main() {
   }
 }
 
-main().catch((err) => logger.error(err));
+main().catch(err => logger.error(err));
