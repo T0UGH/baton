@@ -46,6 +46,7 @@ export interface IMMessage {
   userName: string;
   text: string;
   timestamp: number;
+  contextId?: string;
 }
 
 export interface IMResponse {

@@ -33,8 +33,15 @@ export class SessionManager extends EventEmitter {
     this.permissionTimeout = permissionTimeoutSeconds * 1000;
   }
 
-  async getOrCreateSession(userId: string): Promise<Session> {
-    const sessionKey = `${userId}:${this.projectPath}`;
+  private buildSessionKey(userId: string, contextId?: string): string {
+    if (contextId) {
+      return `${userId}:${contextId}:${this.projectPath}`;
+    }
+    return `${userId}:${this.projectPath}`;
+  }
+
+  async getOrCreateSession(userId: string, contextId?: string): Promise<Session> {
+    const sessionKey = this.buildSessionKey(userId, contextId);
 
     if (!sessions.has(sessionKey)) {
       const session: Session = {
@@ -169,13 +176,13 @@ export class SessionManager extends EventEmitter {
     return { success: true, message: `已选择选项: ${finalOptionId}` };
   }
 
-  getSession(userId: string): Session | undefined {
-    const sessionKey = `${userId}:${this.projectPath}`;
+  getSession(userId: string, contextId?: string): Session | undefined {
+    const sessionKey = this.buildSessionKey(userId, contextId);
     return sessions.get(sessionKey);
   }
 
-  async resetSession(userId: string): Promise<IMResponse> {
-    const sessionKey = `${userId}:${this.projectPath}`;
+  async resetSession(userId: string, contextId?: string): Promise<IMResponse> {
+    const sessionKey = this.buildSessionKey(userId, contextId);
     const session = sessions.get(sessionKey);
 
     if (session?.acpClient) {
@@ -190,8 +197,8 @@ export class SessionManager extends EventEmitter {
     };
   }
 
-  getQueueStatus(userId: string): IMResponse {
-    const session = this.getSession(userId);
+  getQueueStatus(userId: string, contextId?: string): IMResponse {
+    const session = this.getSession(userId, contextId);
     if (!session) {
       return {
         success: true,
@@ -213,8 +220,8 @@ export class SessionManager extends EventEmitter {
     };
   }
 
-  async stopTask(userId: string, taskId?: string): Promise<IMResponse> {
-    const session = this.getSession(userId);
+  async stopTask(userId: string, taskId?: string, contextId?: string): Promise<IMResponse> {
+    const session = this.getSession(userId, contextId);
     if (!session) {
       return {
         success: false,
@@ -272,8 +279,8 @@ export class SessionManager extends EventEmitter {
   }
 
   // 触发模式选择
-  async triggerModeSelection(userId: string): Promise<IMResponse> {
-    const session = await this.getOrCreateSession(userId);
+  async triggerModeSelection(userId: string, contextId?: string): Promise<IMResponse> {
+    const session = await this.getOrCreateSession(userId, contextId);
 
     // 检查是否已有待处理的权限请求
     if (session.pendingPermissions.size > 0) {
@@ -328,8 +335,8 @@ export class SessionManager extends EventEmitter {
   }
 
   // 触发模型选择
-  async triggerModelSelection(userId: string): Promise<IMResponse> {
-    const session = await this.getOrCreateSession(userId);
+  async triggerModelSelection(userId: string, contextId?: string): Promise<IMResponse> {
+    const session = await this.getOrCreateSession(userId, contextId);
 
     // 检查是否已有待处理的权限请求
     if (session.pendingPermissions.size > 0) {

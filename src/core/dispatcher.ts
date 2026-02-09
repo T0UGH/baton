@@ -54,7 +54,7 @@ export class CommandDispatcher {
     const command = this.parseCommand(message.text);
 
     // 💡 优化交互：如果当前有待处理的权限请求
-    const session = await this.sessionManager.getOrCreateSession(message.userId);
+    const session = await this.sessionManager.getOrCreateSession(message.userId, message.contextId);
     if (session.pendingPermissions.size > 0) {
       // 如果输入是纯数字，则视为选择选项
       if (/^\d+$/.test(trimmed)) {
@@ -120,7 +120,7 @@ export class CommandDispatcher {
       };
     }
 
-    const session = await this.sessionManager.getOrCreateSession(message.userId);
+    const session = await this.sessionManager.getOrCreateSession(message.userId, message.contextId);
     return this.sessionManager.resolvePermission(session.id, requestId, optionIdOrIndex);
   }
 
@@ -133,44 +133,50 @@ export class CommandDispatcher {
   }
 
   private handleCurrent(message: IMMessage): IMResponse {
-    return this.sessionManager.getQueueStatus(message.userId);
+    return this.sessionManager.getQueueStatus(message.userId, message.contextId);
   }
 
   private async handleStop(message: IMMessage, command: ParsedCommand): Promise<IMResponse> {
     const target = command.args[0];
-    return this.sessionManager.stopTask(message.userId, target);
+    return this.sessionManager.stopTask(message.userId, target, message.contextId);
   }
 
   private async handleReset(message: IMMessage): Promise<IMResponse> {
-    return this.sessionManager.resetSession(message.userId);
+    return this.sessionManager.resetSession(message.userId, message.contextId);
   }
 
   private async handleMode(message: IMMessage, command: ParsedCommand): Promise<IMResponse> {
     const mode = command.args[0];
     if (mode) {
       // 直接切换
-      const session = await this.sessionManager.getOrCreateSession(message.userId);
+      const session = await this.sessionManager.getOrCreateSession(
+        message.userId,
+        message.contextId
+      );
       if (session.acpClient) {
         return session.acpClient.setMode(mode);
       }
       return { success: false, message: 'Agent 未启动' };
     }
     // 触发选择界面
-    return this.sessionManager.triggerModeSelection(message.userId);
+    return this.sessionManager.triggerModeSelection(message.userId, message.contextId);
   }
 
   private async handleModel(message: IMMessage, command: ParsedCommand): Promise<IMResponse> {
     const model = command.args[0];
     if (model) {
       // 直接切换
-      const session = await this.sessionManager.getOrCreateSession(message.userId);
+      const session = await this.sessionManager.getOrCreateSession(
+        message.userId,
+        message.contextId
+      );
       if (session.acpClient) {
         return session.acpClient.setModel(model);
       }
       return { success: false, message: 'Agent 未启动' };
     }
     // 触发选择界面
-    return this.sessionManager.triggerModelSelection(message.userId);
+    return this.sessionManager.triggerModelSelection(message.userId, message.contextId);
   }
 
   private handleHelp(): IMResponse {
@@ -202,7 +208,7 @@ export class CommandDispatcher {
 
   private async handlePrompt(message: IMMessage, command: ParsedCommand): Promise<IMResponse> {
     // 获取或创建会话
-    const session = await this.sessionManager.getOrCreateSession(message.userId);
+    const session = await this.sessionManager.getOrCreateSession(message.userId, message.contextId);
 
     // 💡 隐式取消逻辑：如果当前有待处理的权限请求，说明用户可能想改需求
     // 发送新指令会自动取消当前的权限请求和任务
@@ -210,7 +216,7 @@ export class CommandDispatcher {
       console.log(
         `[Dispatcher] User sent new instruction while permission pending. Cancelling current task...`
       );
-      await this.sessionManager.stopTask(message.userId);
+      await this.sessionManager.stopTask(message.userId, undefined, message.contextId);
       // 显式清理挂起的请求
       for (const [requestId] of session.pendingPermissions) {
         this.sessionManager.resolvePermission(session.id, requestId, 'cancel');

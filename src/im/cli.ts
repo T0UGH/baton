@@ -1,9 +1,17 @@
+/**
+ * CLI 适配器
+ * 命令行交互适配器，处理本地命令行模式下的消息收发
+ * 提供基于 readline 的交互式界面
+ */
 import readline from 'node:readline/promises';
 import type { IMMessage, IMResponse, Session } from '../types';
 import { CommandDispatcher } from '../core/dispatcher';
 import { SessionManager } from '../core/session';
 import { TaskQueueEngine } from '../core/queue';
 import { BaseIMAdapter, IMPlatform, type IMMessageFormat, type IMReplyOptions } from './adapter';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('CLIAdapter');
 
 export class CLIAdapter extends BaseIMAdapter {
   readonly platform = IMPlatform.CLI;
@@ -15,6 +23,9 @@ export class CLIAdapter extends BaseIMAdapter {
   private rl: readline.Interface | null = null;
   // 存储正在等待的任务
   private pendingResponses: Map<string, (response: IMResponse) => void> = new Map();
+  // 用于防止重复处理（如用户快速按回车）
+  private lastInput: { text: string; timestamp: number } | null = null;
+  private duplicateTTL: number = 1000; // 1秒内相同内容视为重复
 
   constructor(projectPath: string) {
     super();
@@ -70,11 +81,24 @@ export class CLIAdapter extends BaseIMAdapter {
 
       if (!text) continue;
 
+      // 去重检查：防止用户快速重复输入
+      const now = Date.now();
+      if (
+        this.lastInput &&
+        this.lastInput.text === text &&
+        now - this.lastInput.timestamp < this.duplicateTTL
+      ) {
+        logger.debug({ text }, 'Skipping duplicate input');
+        continue;
+      }
+      this.lastInput = { text, timestamp: now };
+
       const message: IMMessage = {
         userId: mockUserId,
         userName: mockUserName,
         text,
-        timestamp: Date.now(),
+        timestamp: now,
+        contextId: 'cli',
       };
 
       try {

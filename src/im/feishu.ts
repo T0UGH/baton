@@ -55,7 +55,7 @@ export class FeishuAdapter extends BaseIMAdapter {
   private sessionContext: Map<string, { userId: string }> = new Map();
   // 用于防止重复处理消息
   private processedMessages: Map<string, number> = new Map();
-  private messageTTL: number = 30000; // 30秒内认为是重复消息
+  private messageTTL: number = 300000; // 5分钟内认为是重复消息（防止网络延迟导致的重发）
 
   constructor(config: BatonConfig) {
     super();
@@ -264,18 +264,25 @@ export class FeishuAdapter extends BaseIMAdapter {
       const userId = sender.sender_id?.user_id || sender.sender_id?.open_id || 'unknown';
       const userName = sender.sender_id?.name || 'Unknown';
 
-      // 构建 IMMessage
+      // 构建 IMMessage，添加 chat_id 作为 contextId 实现群聊隔离
       const imMessage: IMMessage = {
         userId,
         userName,
         text: text.trim(),
         timestamp: Date.now(),
+        contextId: message.chat_id,
       };
 
-      logger.info({ userName, userId, text: text.substring(0, 50) }, 'Received message');
+      logger.info(
+        { userName, userId, contextId: message.chat_id, text: text.substring(0, 50) },
+        'Received message'
+      );
 
-      // 获取或创建会话
-      const session = await this.sessionManager.getOrCreateSession(imMessage.userId);
+      // 获取或创建会话，传递 contextId 实现群聊隔离
+      const session = await this.sessionManager.getOrCreateSession(
+        imMessage.userId,
+        imMessage.contextId
+      );
 
       // 存储初始消息上下文
       this.updateSessionMessageContext(session.id, message.chat_id, message.message_id);
