@@ -2,12 +2,14 @@
  * 会话管理器
  * 管理用户会话生命周期，包括创建、查找、销毁和 ACP Agent 进程的启停
  * 提供用户隔离机制，确保每个用户有独立的执行环境和状态
+ * 支持多仓库切换，每个仓库有独立的 session
  */
-import type { Session, IMResponse } from '../types';
+import type { Session, IMResponse, RepoInfo } from '../types';
 import { ACPClient } from '../acp/client';
 import { createLogger } from '../utils/logger';
 import { EventEmitter } from 'node:events';
 import type { RequestPermissionRequest, PermissionOption } from '@agentclientprotocol/sdk';
+import { RepoManager } from './repo';
 
 const logger = createLogger('SessionManager');
 
@@ -25,12 +27,31 @@ const sessions = new Map<string, Session>();
 
 export class SessionManager extends EventEmitter {
   private projectPath: string;
-  private permissionTimeout: number; // 毫秒
+  private permissionTimeout: number;
+  private repoManager: RepoManager | null = null;
+  private currentRepoInfo: RepoInfo | null = null;
 
   constructor(projectPath: string, permissionTimeoutSeconds: number = 300) {
     super();
     this.projectPath = projectPath;
     this.permissionTimeout = permissionTimeoutSeconds * 1000;
+  }
+
+  setRepoManager(repoManager: RepoManager): void {
+    this.repoManager = repoManager;
+  }
+
+  setCurrentRepo(repoInfo: RepoInfo): void {
+    this.currentRepoInfo = repoInfo;
+    this.projectPath = repoInfo.path;
+  }
+
+  getCurrentRepo(): RepoInfo | null {
+    return this.currentRepoInfo;
+  }
+
+  getRepoManager(): RepoManager | null {
+    return this.repoManager;
   }
 
   private buildSessionKey(userId: string, contextId?: string): string {
@@ -48,6 +69,7 @@ export class SessionManager extends EventEmitter {
         id: generateUUID(),
         userId,
         projectPath: this.projectPath,
+        repoName: this.currentRepoInfo?.name,
         acpClient: null,
         queue: {
           pending: [],
@@ -388,5 +410,15 @@ export class SessionManager extends EventEmitter {
         request: fakeReq,
       });
     });
+  }
+
+  async resetAllSessions(): Promise<void> {
+    for (const session of sessions.values()) {
+      if (session.acpClient) {
+        await session.acpClient.stop();
+      }
+    }
+    sessions.clear();
+    logger.info('[Session] All sessions reset');
   }
 }

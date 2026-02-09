@@ -2,13 +2,15 @@
  * 飞书适配器
  * 实现飞书平台的 WebSocket 长链接通信，处理消息收发和事件订阅
  * 作为 IM 接入层与核心逻辑层的桥梁，将飞书消息转换为 Baton 内部格式
+ * 支持多仓库切换
  */
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { BatonConfig } from '../config/types';
-import type { IMMessage, IMResponse, Session } from '../types';
+import type { IMMessage, IMResponse, Session, RepoInfo } from '../types';
 import { CommandDispatcher } from '../core/dispatcher';
 import { SessionManager } from '../core/session';
 import { TaskQueueEngine } from '../core/queue';
+import { RepoManager } from '../core/repo';
 import { createLogger } from '../utils/logger';
 import { BaseIMAdapter, IMPlatform, type IMMessageFormat, type IMReplyOptions } from './adapter';
 import { convertToFeishuCard } from './feishu/converter';
@@ -57,7 +59,7 @@ export class FeishuAdapter extends BaseIMAdapter {
   private processedMessages: Map<string, number> = new Map();
   private messageTTL: number = 300000; // 5分钟内认为是重复消息（防止网络延迟导致的重发）
 
-  constructor(config: BatonConfig) {
+  constructor(config: BatonConfig, selectedRepo?: RepoInfo, repoManager?: RepoManager) {
     super();
     this.config = config;
 
@@ -74,10 +76,13 @@ export class FeishuAdapter extends BaseIMAdapter {
     });
 
     // 创建会话管理器
-    this.sessionManager = new SessionManager(
-      config.project.path,
-      config.feishu.card?.permissionTimeout
-    );
+    const projectPath = selectedRepo?.path || config.project.path;
+    this.sessionManager = new SessionManager(projectPath, config.feishu.card?.permissionTimeout);
+
+    if (repoManager && selectedRepo) {
+      this.sessionManager.setRepoManager(repoManager);
+      this.sessionManager.setCurrentRepo(selectedRepo);
+    }
 
     // 监听权限请求事件
     this.sessionManager.on('permissionRequest', async event => {

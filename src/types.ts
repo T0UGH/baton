@@ -11,6 +11,7 @@ export interface Session {
   id: string;
   userId: string;
   projectPath: string;
+  repoName?: string;
   acpClient: ACPClient | null;
   queue: TaskQueue;
   isProcessing: boolean;
@@ -63,11 +64,16 @@ export type CommandType =
   | 'mode'
   | 'model'
   | 'help'
-  | 'prompt'
-  | 'select';
+  | 'prompt';
 
 export interface ParsedCommand {
   type: CommandType;
   args: string[];
   raw: string;
+}
+
+export interface RepoInfo {
+  name: string;
+  path: string;
+  gitPath: string;
 }

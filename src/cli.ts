@@ -2,20 +2,23 @@
  * CLI 交互模式
  * 提供命令行交互界面，用于本地开发和测试，直接通过终端与 Agent 对话
  * 适合开发调试和无 IM 平台配置的场景
+ * 支持多仓库切换
  */
 import readline from 'node:readline/promises';
+import * as path from 'node:path';
 import { CommandDispatcher } from './core/dispatcher';
 import { SessionManager } from './core/session';
 import { TaskQueueEngine } from './core/queue';
-import type { IMMessage, IMResponse, Session } from './types';
+import { RepoManager } from './core/repo';
+import type { IMMessage, IMResponse, Session, RepoInfo } from './types';
 import type { PermissionOption, RequestPermissionRequest } from '@agentclientprotocol/sdk';
 
-const projectPath = process.cwd();
+const rootPath = process.cwd();
 
 console.log('╔════════════════════════════════════════╗');
 console.log('║           Baton CLI v0.1.0             ║');
 console.log('╚════════════════════════════════════════╝');
-console.log(`\nProject: ${projectPath}\n`);
+console.log(`\nRoot: ${rootPath}`);
 
 // 权限请求事件类型
 interface PermissionRequestEvent {
@@ -31,8 +34,41 @@ export async function main() {
   const mockUserName = 'Developer';
   let isShuttingDown = false;
 
+  // 扫描仓库
+  const repoManager = new RepoManager();
+  let repos: RepoInfo[] = [];
+  try {
+    repos = await repoManager.scanFromRoot(rootPath);
+  } catch {
+    // 扫描失败，继续
+  }
+
+  let selectedRepo: RepoInfo;
+  if (repos.length === 0) {
+    console.log('\n⚠️  未发现任何 Git 仓库，使用当前目录');
+    selectedRepo = {
+      name: path.basename(rootPath),
+      path: rootPath,
+      gitPath: path.join(rootPath, '.git'),
+    };
+  } else if (repos.length === 1) {
+    selectedRepo = repos[0];
+    console.log(`\n📂 当前仓库: ${selectedRepo.name}\n`);
+  } else {
+    console.log('\n📦 发现多个 Git 仓库:\n');
+    repos.forEach((repo, idx) => {
+      const relPath = repoManager.listRepos()[idx].path;
+      console.log(`   ${idx}. ${repo.name} (${relPath})`);
+    });
+    console.log();
+    selectedRepo = repos[0];
+    console.log(`📂 当前仓库: ${selectedRepo.name}\n`);
+  }
+
   // 创建会话管理器
-  const sessionManager = new SessionManager(projectPath);
+  const sessionManager = new SessionManager(selectedRepo.path);
+  sessionManager.setRepoManager(repoManager);
+  sessionManager.setCurrentRepo(selectedRepo);
 
   // 监听权限请求
   sessionManager.on('permissionRequest', (event: PermissionRequestEvent) => {

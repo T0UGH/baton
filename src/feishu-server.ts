@@ -3,10 +3,14 @@
  * 飞书服务器入口
  * 启动 WebSocket 长链接连接到飞书平台，接收和处理消息事件
  * 生产环境部署的主要入口，支持内网运行无需公网暴露
+ * 支持多仓库切换
  */
+import * as path from 'node:path';
 import { loadConfig } from './config/loader';
 import { FeishuAdapter } from './im/feishu';
+import { RepoManager } from './core/repo';
 import { createLogger } from './utils/logger';
+import type { RepoInfo } from './types';
 
 const logger = createLogger('FeishuServer');
 
@@ -25,8 +29,41 @@ export async function main(configPath?: string) {
       process.exit(1);
     }
 
+    const rootPath = config.project?.path || process.cwd();
+
+    logger.info(`📂 扫描目录: ${rootPath}`);
+
+    const repoManager = new RepoManager();
+    let repos: RepoInfo[] = [];
+    try {
+      repos = await repoManager.scanFromRoot(rootPath);
+    } catch (error) {
+      logger.error({ error }, '扫描仓库失败');
+    }
+
+    let selectedRepo: RepoInfo | undefined;
+    if (repos.length === 0) {
+      logger.warn('⚠️ 未发现任何 Git 仓库，使用当前目录作为工作目录');
+      selectedRepo = {
+        name: path.basename(rootPath),
+        path: rootPath,
+        gitPath: path.join(rootPath, '.git'),
+      };
+    } else if (repos.length === 1) {
+      selectedRepo = repos[0];
+      logger.info(`📂 当前仓库: ${selectedRepo.name}`);
+    } else {
+      logger.info(`\n📦 发现 ${repos.length} 个 Git 仓库`);
+      repos.forEach((repo, idx) => {
+        const relPath = repoManager.listRepos()[idx].path;
+        logger.info(`   ${idx}. ${repo.name} (${relPath})`);
+      });
+      selectedRepo = repos[0];
+      logger.info(`📂 当前仓库: ${selectedRepo.name}`);
+    }
+
     // 创建飞书适配器
-    adapter = new FeishuAdapter(config);
+    adapter = new FeishuAdapter(config, selectedRepo, repoManager);
 
     // 优雅关闭处理
     const shutdown = async (signal: string) => {
