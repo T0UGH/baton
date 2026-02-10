@@ -203,6 +203,15 @@ export class SessionManager extends EventEmitter {
     return sessions.get(sessionKey);
   }
 
+  getSessionById(sessionId: string): Session | undefined {
+    for (const session of sessions.values()) {
+      if (session.id === sessionId) {
+        return session;
+      }
+    }
+    return undefined;
+  }
+
   async resetSession(userId: string, contextId?: string): Promise<IMResponse> {
     const sessionKey = this.buildSessionKey(userId, contextId);
     const session = sessions.get(sessionKey);

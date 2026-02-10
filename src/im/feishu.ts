@@ -185,37 +185,21 @@ export class FeishuAdapter extends BaseIMAdapter {
       return;
     }
 
-    // 构建卡片内容
+    // 获取 session 信息以获取仓库路径
+    const session = this.sessionManager.getSessionById(sessionId);
+    const repoPath = session?.repoName || session?.projectPath || 'unknown';
+
+    // 构建卡片内容 - 只保留核心对话内容
     const elements: { type: 'markdown'; content: string }[] = [
       {
         type: 'markdown',
-        content: `Agent 请求执行以下操作：\n**${toolName}**`,
+        content: `**${toolName}**`,
+      },
+      {
+        type: 'markdown',
+        content: `---\nSession ID: ${sessionId}`,
       },
     ];
-
-    // 如果有参数细节，展示出来
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    if (toolCall.rawInput) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      const details =
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        typeof toolCall.rawInput === 'string'
-          ? // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            toolCall.rawInput
-          : // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            JSON.stringify(toolCall.rawInput, null, 2);
-      elements.push({
-        type: 'markdown',
-        content: `**细节：**\n\`\`\`json\n${details}\n\`\`\``,
-      });
-    }
-
-    elements.push({
-      type: 'markdown',
-      content: '*💡 提示：输入新指令可自动取消本次请求并开始新任务。发送 /stop 可终止任务。*',
-    });
 
     // 构建动态按钮
     const actions = options.map(opt => ({
@@ -234,9 +218,9 @@ export class FeishuAdapter extends BaseIMAdapter {
       }),
     }));
 
-    // 构建通用卡片
+    // 构建通用卡片 - 标题包含仓库路径
     const card: UniversalCard = {
-      title: '🔐 权限确认',
+      title: `🔐 ${repoPath}`,
       elements,
       actions: actions as unknown as {
         id: string;
@@ -537,21 +521,20 @@ export class FeishuAdapter extends BaseIMAdapter {
 
     const { chatId, messageId } = context;
 
-    // 构建富文本完成卡片
+    // 获取仓库路径
+    const repoPath = session.repoName || session.projectPath || 'unknown';
+
+    // 构建富文本完成卡片 - 简洁格式
     const completionCard: UniversalCard = {
-      title: response.success ? '✅ 任务执行成功' : '❌ 任务执行失败',
+      title: `${response.success ? '✅' : '❌'} ${repoPath}`,
       elements: [
         {
           type: 'markdown',
           content: this.truncateMessage(response.message, 2000), // 飞书卡片长度限制
         },
         {
-          type: 'field_group',
-          fields: [
-            { title: 'Session ID', content: session.id },
-            { title: '项目', content: this.config.project.name },
-            { title: '状态', content: response.success ? 'Completed' : 'Failed' },
-          ],
+          type: 'markdown',
+          content: `---\nSession ID: ${session.id}`,
         },
       ],
     };
