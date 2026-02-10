@@ -23,6 +23,7 @@ export interface Session {
     string,
     {
       resolve: (value: string) => void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       reject: (reason?: any) => void;
       timestamp: number;
       request: RequestPermissionRequest; // 存储原始请求以获取选项列表
@@ -53,6 +54,7 @@ export interface IMMessage {
 export interface IMResponse {
   success: boolean;
   message: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data?: any;
 }
 

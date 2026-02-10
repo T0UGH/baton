@@ -484,12 +484,18 @@ export class ACPClient {
       });
     } else {
       // 如果没有标准方法，尝试使用通用 execute 方法
-      const conn = this.connection as any;
-      if (conn.execute) {
-        await conn.execute('session/setModel', {
-          sessionId: this.currentSessionId,
-          modelId,
-        });
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+      const conn = this.connection as unknown as Record<string, unknown>;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      if (typeof conn.execute === 'function') {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        await (conn.execute as (method: string, params: unknown) => Promise<unknown>)(
+          'session/setModel',
+          {
+            sessionId: this.currentSessionId,
+            modelId,
+          }
+        );
       } else {
         throw new Error('setSessionModel not supported by connection');
       }

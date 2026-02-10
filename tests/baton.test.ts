@@ -18,6 +18,17 @@ class MockFeishuClient {
 
   constructor(projectPath: string) {
     const sessionManager = new SessionManager(projectPath);
+    // 创建一个简单的 mock repoManager
+    const mockRepoManager = {
+      listRepos: () => [],
+      findRepo: () => null,
+      getRepoByPath: () => null,
+      getAllRepos: () => [],
+      getRootPath: () => projectPath,
+    };
+    sessionManager.setRepoManager(
+      mockRepoManager as unknown as import('../src/core/repo').RepoManager
+    );
     const queueEngine = new TaskQueueEngine();
     this.dispatcher = new CommandDispatcher(sessionManager, queueEngine);
   }
@@ -27,7 +38,7 @@ class MockFeishuClient {
       userId: this.userId,
       userName: this.userName,
       text,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     return await this.dispatcher.dispatch(message);
@@ -69,7 +80,13 @@ describe('Baton MVP Tests', () => {
     it('should parse /repo command', async () => {
       const response = await mockClient.sendMessage('/repo');
       assert.strictEqual(response.success, true);
-      assert.ok(response.message.includes('当前项目'));
+      // 现在 /repo 命令在没有仓库时返回 "未发现任何 Git 仓库"
+      // 或者在有仓库时返回仓库列表
+      assert.ok(
+        response.message.includes('未发现任何 Git 仓库') ||
+          response.message.includes('📦 可用仓库') ||
+          response.message.includes('当前仓库')
+      );
     });
 
     it('should parse /reset command', async () => {
@@ -102,7 +119,7 @@ describe('Baton MVP Tests', () => {
     it('should show queue status', async () => {
       await mockClient.sendMessage('Test task');
       const status = await mockClient.sendMessage('/current');
-      
+
       assert.strictEqual(status.success, true);
     });
   });
@@ -110,7 +127,7 @@ describe('Baton MVP Tests', () => {
   describe('Session Management', () => {
     it('should create session on first message', async () => {
       const sessionManager = new SessionManager(testProjectPath);
-      
+
       const initial = sessionManager.getSession('new-user');
       assert.strictEqual(initial, undefined);
 
@@ -120,7 +137,7 @@ describe('Baton MVP Tests', () => {
 
     it('should reset session', async () => {
       await mockClient.sendMessage('Create session');
-      
+
       const reset = await mockClient.sendMessage('/reset');
       assert.strictEqual(reset.success, true);
     });

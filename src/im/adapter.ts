@@ -20,6 +20,7 @@ export interface IMReplyOptions {
   // 回复特定消息（用于线程回复）
   replyToMessageId?: string;
   // 额外元数据（各平台特定）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata?: Record<string, any>;
 }
 

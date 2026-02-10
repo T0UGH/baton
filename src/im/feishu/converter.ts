@@ -1,11 +1,17 @@
 import type { UniversalCard, CardElement, CardAction } from '../types';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type FeishuCard = Record<string, any>;
+
 /**
  * 将通用卡片转换为飞书交互式卡片格式
  * 文档: https://open.feishu.cn/document/ukTMukTMukTM/uEjNwYjLxYDM24SM2AjN
  */
-export function convertToFeishuCard(card: UniversalCard): any {
-  const feishuCard: any = {
+export function convertToFeishuCard(card: UniversalCard): FeishuCard {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const elements: any[] = [];
+
+  const feishuCard: FeishuCard = {
     config: {
       wide_screen_mode: true,
     },
@@ -16,14 +22,14 @@ export function convertToFeishuCard(card: UniversalCard): any {
       },
       template: 'blue', // 默认使用蓝色标题
     },
-    elements: [] as any[],
+    elements,
   };
 
   // 转换内容元素
   for (const element of card.elements) {
     const feishuElement = convertElement(element);
     if (feishuElement) {
-      feishuCard.elements.push(feishuElement);
+      elements.push(feishuElement);
     }
   }
 
@@ -33,13 +39,13 @@ export function convertToFeishuCard(card: UniversalCard): any {
       tag: 'action',
       actions: card.actions.map(convertAction),
     };
-    feishuCard.elements.push(actionElement);
+    elements.push(actionElement);
   }
 
   return feishuCard;
 }
 
-function convertElement(element: CardElement): any {
+function convertElement(element: CardElement): FeishuCard | null {
   switch (element.type) {
     case 'markdown':
       return {
@@ -76,8 +82,8 @@ function convertElement(element: CardElement): any {
   }
 }
 
-function convertAction(action: CardAction): any {
-  const button: any = {
+function convertAction(action: CardAction): FeishuCard {
+  const button: FeishuCard = {
     tag: 'button',
     text: {
       tag: 'plain_text',
@@ -91,15 +97,14 @@ function convertAction(action: CardAction): any {
   };
 
   if (action.confirm) {
-    const confirmAction = action as any;
     button.confirm = {
       title: {
         tag: 'plain_text',
-        content: confirmAction.confirm.title,
+        content: action.confirm.title,
       },
       text: {
         tag: 'plain_text',
-        content: confirmAction.confirm.content,
+        content: action.confirm.content,
       },
     };
   }

@@ -48,6 +48,7 @@ export interface InteractionContext {
   // 最后更新时间
   updatedAt: number;
   // 自定义数据（用于保存上下文）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata: Record<string, any>;
   // 恢复函数（当用户响应时调用）
   resume?: (userResponse: UserResponse) => Promise<void>;
@@ -70,6 +71,7 @@ export interface UserResponse {
   // 时间戳
   timestamp: number;
   // 额外数据
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data?: Record<string, any>;
 }
 
@@ -114,7 +116,11 @@ export interface IInteractionManager {
   /**
    * 更新交互状态
    */
-  updateState(interactionId: string, state: InteractionState, metadata?: Record<string, any>): void;
+  updateState(
+    interactionId: string,
+    state: InteractionState,
+    metadata?: Record<string, unknown>
+  ): void;
 
   /**
    * 注册恢复函数
@@ -186,7 +192,7 @@ export class InteractionManager implements IInteractionManager {
   updateState(
     interactionId: string,
     state: InteractionState,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): void {
     const context = this.contexts.get(interactionId);
     if (context) {

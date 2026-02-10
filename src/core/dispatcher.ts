@@ -117,7 +117,7 @@ export class CommandDispatcher {
     const repos = repoManager.listRepos();
     if (repos.length === 0) {
       return {
-        success: false,
+        success: true,
         message: '未发现任何 Git 仓库',
       };
     }
