@@ -103,8 +103,8 @@ describe('E2E Feishu Card Interaction', () => {
       },
     };
 
-    // 调用 resolvePermission 模拟卡片点击
-    const result = sessionManager.resolvePermission(sessionId, requestId, 'allow');
+    // 调用 resolveInteraction 模拟卡片点击
+    const result = sessionManager.resolveInteraction(sessionId, requestId, 'allow');
 
     expect(result.success).toBe(true);
     expect(result.message).toContain('allow');
@@ -140,7 +140,7 @@ describe('E2E Feishu Card Interaction', () => {
     const { sessionId, requestId } = permissionEvent;
 
     // 使用索引 1 选择 deny 选项
-    const result = sessionManager.resolvePermission(sessionId, requestId, '1');
+    const result = sessionManager.resolveInteraction(sessionId, requestId, '1');
 
     expect(result.success).toBe(true);
     expect(result.message).toContain('deny');
@@ -177,7 +177,7 @@ describe('E2E Feishu Card Interaction', () => {
     const { sessionId, requestId } = permissionEvent;
 
     // 解决权限请求
-    sessionManager.resolvePermission(sessionId, requestId, 'allow');
+    sessionManager.resolveInteraction(sessionId, requestId, 'allow');
 
     // 等待所有任务完成
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -193,7 +193,7 @@ describe('E2E Feishu Card Interaction', () => {
     const session = await sessionManager.getOrCreateSession('test-user-4', 'test-context-4');
 
     // 尝试解析不存在的权限请求
-    const result = sessionManager.resolvePermission(session.id, 'non-existent-request-id', 'allow');
+    const result = sessionManager.resolveInteraction(session.id, 'non-existent-request-id', 'allow');
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('not found');
@@ -216,13 +216,13 @@ describe('E2E Feishu Card Interaction', () => {
 
     const { sessionId, requestId } = permissionEvent;
 
-    // 测试直接调用 resolvePermission（模拟 handleCardAction 内部的调用）
+    // 测试直接调用 resolveInteraction（模拟 handleCardAction 内部的调用）
     // 验证 option_id 能正确传递
-    const result = sessionManager.resolvePermission(sessionId, requestId, 'allow');
+    const result = sessionManager.resolveInteraction(sessionId, requestId, 'allow');
     expect(result.success).toBe(true);
 
     // 验证已经 resolve 后再次尝试会失败
-    const secondResult = sessionManager.resolvePermission(sessionId, requestId, 'deny');
+    const secondResult = sessionManager.resolveInteraction(sessionId, requestId, 'deny');
     expect(secondResult.success).toBe(false);
     expect(secondResult.message).toContain('not found');
   });

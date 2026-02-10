@@ -78,7 +78,7 @@ export class SessionManager extends EventEmitter {
         isProcessing: false,
         availableModes: [],
         availableModels: [],
-        pendingPermissions: new Map(),
+        pendingInteractions: new Map(),
       };
       sessions.set(sessionKey, session);
       logger.info(`[Session] Created new session for user ${userId}`);
@@ -95,12 +95,17 @@ export class SessionManager extends EventEmitter {
         return new Promise<string>((resolve, reject) => {
           const requestId = generateUUID(); // 生成本次请求的唯一 ID
 
-          // 存入 pendingPermissions
-          session.pendingPermissions.set(requestId, {
+          // 存入 pendingInteractions
+          session.pendingInteractions.set(requestId, {
+            type: 'permission',
             resolve,
             reject,
             timestamp: Date.now(),
-            request: req,
+            data: {
+              title: req.toolCall.title ?? '权限请求',
+              options: req.options.map(o => ({ optionId: o.optionId, name: o.name })),
+              originalRequest: req,
+            },
           });
 
           logger.info(
@@ -118,8 +123,8 @@ export class SessionManager extends EventEmitter {
 
           // 设置超时自动拒绝
           setTimeout(() => {
-            if (session.pendingPermissions.has(requestId)) {
-              const pending = session.pendingPermissions.get(requestId);
+            if (session.pendingInteractions.has(requestId)) {
+              const pending = session.pendingInteractions.get(requestId);
               // 默认拒绝：查找是否有 deny/cancel 选项，没有则选第一个
               const fallbackOption =
                 req.options.find(
@@ -129,7 +134,7 @@ export class SessionManager extends EventEmitter {
                 req.options[0]?.optionId ||
                 'deny';
               pending?.resolve(fallbackOption);
-              session.pendingPermissions.delete(requestId);
+              session.pendingInteractions.delete(requestId);
               logger.warn({ sessionId: session.id, requestId }, 'Permission request timed out');
             }
           }, this.permissionTimeout);
@@ -153,7 +158,7 @@ export class SessionManager extends EventEmitter {
   }
 
   // 处理权限确认结果
-  resolvePermission(sessionId: string, requestId: string, optionIdOrIndex: string): IMResponse {
+  resolveInteraction(sessionId: string, requestId: string, optionIdOrIndex: string): IMResponse {
     // 查找 session
     let session: Session | undefined;
     for (const s of sessions.values()) {
@@ -167,13 +172,13 @@ export class SessionManager extends EventEmitter {
       return { success: false, message: 'Session not found' };
     }
 
-    const pending = session.pendingPermissions.get(requestId);
+    const pending = session.pendingInteractions.get(requestId);
     if (!pending) {
       return { success: false, message: 'Permission request not found or expired' };
     }
 
     let finalOptionId = optionIdOrIndex;
-    const options = pending.request.options;
+    const options = pending.data.options;
 
     // 检查是否是序号
     const index = parseInt(optionIdOrIndex, 10);
@@ -192,10 +197,73 @@ export class SessionManager extends EventEmitter {
 
     // 执行回调
     pending.resolve(finalOptionId);
-    session.pendingPermissions.delete(requestId);
+    session.pendingInteractions.delete(requestId);
 
-    logger.info({ sessionId, requestId, finalOptionId }, 'Permission resolved by user');
+    logger.info({ sessionId, requestId, finalOptionId }, 'Interaction resolved by user');
     return { success: true, message: `已选择选项: ${finalOptionId}` };
+  }
+
+  // 创建仓库选择交互
+  async createRepoSelection(
+    userId: string,
+    contextId: string | undefined,
+    repos: { index: number; name: string; path: string }[]
+  ): Promise<IMResponse> {
+    const session = await this.getOrCreateSession(userId, contextId);
+
+    // 检查是否已有待处理的交互
+    if (session.pendingInteractions.size > 0) {
+      return {
+        success: false,
+        message: '当前有待处理的选择，请先完成后再试',
+      };
+    }
+
+    return new Promise(resolve => {
+      const requestId = generateUUID();
+      session.pendingInteractions.set(requestId, {
+        type: 'repo_selection',
+        resolve: async optionId => {
+          const repoManager = this.getRepoManager();
+          if (repoManager) {
+            const targetRepo = repoManager.findRepo(optionId);
+            if (targetRepo) {
+              await this.resetAllSessions();
+              this.setCurrentRepo(targetRepo);
+              resolve({
+                success: true,
+                message: `🔄 已切换到仓库: ${targetRepo.name}`,
+              });
+            } else {
+              resolve({ success: false, message: `未找到仓库: ${optionId}` });
+            }
+          } else {
+            resolve({ success: false, message: '仓库管理器未初始化' });
+          }
+        },
+        reject: () => resolve({ success: false, message: '已取消' }),
+        timestamp: Date.now(),
+        data: {
+          title: '选择仓库',
+          options: repos.map(r => ({ optionId: String(r.index), name: r.name })),
+        },
+      });
+
+      this.emit('permissionRequest', {
+        sessionId: session.id,
+        requestId,
+        userId: session.userId,
+        request: {
+          sessionId: session.id,
+          toolCall: { title: '📦 选择仓库', toolCallId: 'repo_selection' },
+          options: repos.map(r => ({
+            optionId: String(r.index),
+            name: `${r.name} (${r.path})`,
+            kind: 'allow_once' as const,
+          })),
+        },
+      });
+    });
   }
 
   getSession(userId: string, contextId?: string): Session | undefined {
@@ -314,7 +382,7 @@ export class SessionManager extends EventEmitter {
     const session = await this.getOrCreateSession(userId, contextId);
 
     // 检查是否已有待处理的权限请求
-    if (session.pendingPermissions.size > 0) {
+    if (session.pendingInteractions.size > 0) {
       return {
         success: false,
         message: '当前已有待处理的权限请求，请先处理完当前请求再试',
@@ -343,7 +411,8 @@ export class SessionManager extends EventEmitter {
 
     return new Promise(resolve => {
       const requestId = generateUUID();
-      session.pendingPermissions.set(requestId, {
+      session.pendingInteractions.set(requestId, {
+        type: 'mode_selection',
         resolve: async optionId => {
           if (session.acpClient) {
             const res = await session.acpClient.setMode(optionId);
@@ -353,7 +422,10 @@ export class SessionManager extends EventEmitter {
         },
         reject: () => resolve({ success: false, message: '已取消' }),
         timestamp: Date.now(),
-        request: fakeReq,
+        data: {
+          title: fakeReq.toolCall.title ?? '选择',
+          options: fakeReq.options.map(o => ({ optionId: o.optionId, name: o.name })),
+        },
       });
 
       this.emit('permissionRequest', {
@@ -370,7 +442,7 @@ export class SessionManager extends EventEmitter {
     const session = await this.getOrCreateSession(userId, contextId);
 
     // 检查是否已有待处理的权限请求
-    if (session.pendingPermissions.size > 0) {
+    if (session.pendingInteractions.size > 0) {
       return {
         success: false,
         message: '当前已有待处理的权限请求，请先处理完当前请求再试',
@@ -399,7 +471,8 @@ export class SessionManager extends EventEmitter {
 
     return new Promise(resolve => {
       const requestId = generateUUID();
-      session.pendingPermissions.set(requestId, {
+      session.pendingInteractions.set(requestId, {
+        type: 'model_selection',
         resolve: async optionId => {
           if (session.acpClient) {
             const res = await session.acpClient.setModel(optionId);
@@ -409,7 +482,10 @@ export class SessionManager extends EventEmitter {
         },
         reject: () => resolve({ success: false, message: '已取消' }),
         timestamp: Date.now(),
-        request: fakeReq,
+        data: {
+          title: fakeReq.toolCall.title ?? '选择',
+          options: fakeReq.options.map(o => ({ optionId: o.optionId, name: o.name })),
+        },
       });
 
       this.emit('permissionRequest', {

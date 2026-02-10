@@ -19,21 +19,24 @@ export interface Session {
   currentModeId?: string;
   availableModels: ModelInfo[];
   currentModelId?: string;
-  pendingPermissions: Map<
+  // 统一的交互等待机制，支持权限请求、仓库选择、模式选择等
+  pendingInteractions: Map<
     string,
     {
+      type: 'permission' | 'repo_selection' | 'mode_selection' | 'model_selection';
       resolve: (value: string) => void;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       reject: (reason?: any) => void;
       timestamp: number;
-      request: RequestPermissionRequest; // 存储原始请求以获取选项列表
+      // 交互数据：权限请求时为 RequestPermissionRequest，选择时为选项列表
+      data: {
+        title?: string;
+        options: { optionId: string; name: string }[];
+        // 可选：原始请求对象（用于权限请求）
+        originalRequest?: RequestPermissionRequest;
+      };
     }
   >;
-  // 用于存储当前正在等待的用户输入类型
-  waitingFor?: {
-    type: 'repo_selection' | 'permission';
-    timestamp: number;
-  };
 }
 
 export interface Task {

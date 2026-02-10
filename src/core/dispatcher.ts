@@ -51,42 +51,27 @@ export class CommandDispatcher {
     const trimmed = message.text.trim();
     const command = this.parseCommand(message.text);
 
-    // 💡 优化交互：如果当前有待处理的权限请求
+    // 💡 统一处理：如果当前有待处理的交互（权限、选择等）
     const session = await this.sessionManager.getOrCreateSession(message.userId, message.contextId);
-    if (session.pendingPermissions.size > 0) {
+    if (session.pendingInteractions.size > 0) {
       // 如果输入是纯数字，则视为选择选项
       if (/^\d+$/.test(trimmed)) {
         // 取第一个挂起的请求
-        const requestId = Array.from(session.pendingPermissions.keys())[0];
+        const requestId = Array.from(session.pendingInteractions.keys())[0];
+        const interaction = session.pendingInteractions.get(requestId);
         console.log(
-          `[Dispatcher] Numeric input detected during pending permission. Treating as selection.`
+          `[Dispatcher] Numeric input detected during pending ${interaction?.type}. Treating as selection.`
         );
-        return this.sessionManager.resolvePermission(session.id, requestId, trimmed);
+        return this.sessionManager.resolveInteraction(session.id, requestId, trimmed);
       } else if (command.type === 'mode' || command.type === 'model') {
-        // 如果是 mode 或 model 命令，提醒用户先处理当前权限请求
-        console.log(`[Dispatcher] Mode/Model command detected during pending permission.`);
+        // 如果是 mode 或 model 命令，提醒用户先处理当前交互
+        console.log(`[Dispatcher] Mode/Model command detected during pending interaction.`);
         return {
           success: false,
           message:
-            '当前已有待处理的权限请求，请先处理完当前请求再试。\n请使用数字序号回复或点击 IM 卡片进行选择。',
+            '当前有待处理的选择，请先完成选择后再试。\n请使用数字序号回复或点击 IM 卡片进行选择。',
         };
       }
-    }
-
-    // 检查是否正在等待仓库选择
-    if (session.waitingFor?.type === 'repo_selection' && /^\d+$/.test(trimmed)) {
-      console.log(
-        `[Dispatcher] Numeric input detected during repo selection. Treating as repo switch.`
-      );
-      // 清除等待状态
-      delete session.waitingFor;
-      // 将数字作为 /repo 命令处理
-      const repoCommand: ParsedCommand = {
-        type: 'repo',
-        args: [trimmed],
-        raw: `/repo ${trimmed}`,
-      };
-      return this.handleRepo(message, repoCommand);
     }
 
     console.log(
@@ -141,20 +126,8 @@ export class CommandDispatcher {
     const identifier = command.args[0]?.trim();
 
     if (!identifier) {
-      const listText = repos.map(r => `  ${r.index}. ${r.name} (${r.path})`).join('\n');
-
-      // 设置等待仓库选择状态
-      const session = await this.sessionManager.getOrCreateSession(
-        message.userId,
-        message.contextId
-      );
-      session.waitingFor = { type: 'repo_selection', timestamp: Date.now() };
-
-      return {
-        success: true,
-        message: `📦 可用仓库:\n${listText}\n\n请输入序号切换仓库`,
-        data: { repos: repos.map(r => ({ index: r.index, name: r.name, path: r.path })) },
-      };
+      // 创建仓库选择交互
+      return this.sessionManager.createRepoSelection(message.userId, message.contextId, repos);
     }
 
     const targetRepo = repoManager.findRepo(identifier);
@@ -175,10 +148,6 @@ export class CommandDispatcher {
 
     await this.sessionManager.resetAllSessions();
     this.sessionManager.setCurrentRepo(targetRepo);
-
-    // 清除等待状态
-    const session = await this.sessionManager.getOrCreateSession(message.userId, message.contextId);
-    delete session.waitingFor;
 
     return {
       success: true,
@@ -268,14 +237,14 @@ export class CommandDispatcher {
 
     // 💡 隐式取消逻辑：如果当前有待处理的权限请求，说明用户可能想改需求
     // 发送新指令会自动取消当前的权限请求和任务
-    if (session.pendingPermissions.size > 0) {
+    if (session.pendingInteractions.size > 0) {
       console.log(
         `[Dispatcher] User sent new instruction while permission pending. Cancelling current task...`
       );
       await this.sessionManager.stopTask(message.userId, undefined, message.contextId);
       // 显式清理挂起的请求
-      for (const [requestId] of session.pendingPermissions) {
-        this.sessionManager.resolvePermission(session.id, requestId, 'cancel');
+      for (const [requestId] of session.pendingInteractions) {
+        this.sessionManager.resolveInteraction(session.id, requestId, 'cancel');
       }
     }
 

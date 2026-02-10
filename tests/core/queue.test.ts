@@ -24,7 +24,7 @@ describe('TaskQueueEngine', () => {
       isProcessing: false,
       availableModes: [],
       availableModels: [],
-      pendingPermissions: new Map(),
+      pendingInteractions: new Map(),
     };
   }
 

@@ -412,9 +412,9 @@ export class FeishuAdapter extends BaseIMAdapter {
         );
 
         // 调用 SessionManager 解决权限
-        // 注意：resolvePermission 是我们刚加的方法，需要确保 SessionManager 上有这个方法
+        // 注意：resolveInteraction 是我们刚加的方法，需要确保 SessionManager 上有这个方法
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        const result = this.sessionManager.resolvePermission(session_id, request_id, option_id);
+        const result = this.sessionManager.resolveInteraction(session_id, request_id, option_id);
 
         // 更新卡片或发送通知
         // 飞书允许直接返回新的卡片内容来更新原卡片（Toast）
