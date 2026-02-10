@@ -11,15 +11,16 @@ const logger = createLogger('Main');
 
 async function main() {
   const mode = process.argv[2] || 'auto';
+  const workDir = process.argv[3]; // 工作目录参数
 
   if (mode === 'cli') {
     // 强制 CLI 模式
     const { main: cliMain } = await import('./cli.js');
-    await cliMain();
+    await cliMain(workDir);
   } else if (mode === 'feishu') {
     // 强制飞书模式
     const { main: feishuMain } = await import('./feishu-server.js');
-    await feishuMain();
+    await feishuMain(undefined, workDir);
   } else {
     // 自动判断
     const config = loadConfig();
@@ -28,12 +29,12 @@ async function main() {
       logger.info('🤖 检测到飞书配置，启动飞书模式...');
       logger.info('   (使用 bun run start -- cli 强制 CLI 模式)');
       const { main: feishuMain } = await import('./feishu-server.js');
-      await feishuMain();
+      await feishuMain(undefined, workDir);
     } else {
       logger.info('💻 未检测到飞书配置，启动 CLI 模式...');
       logger.info('   (使用 bun run start -- feishu 强制飞书模式)');
       const { main: cliMain } = await import('./cli.js');
-      await cliMain();
+      await cliMain(workDir);
     }
   }
 }

@@ -77,6 +77,11 @@ function convertElement(element: CardElement): FeishuCard | null {
         })),
       };
 
+    case 'hr':
+      return {
+        tag: 'hr',
+      };
+
     default:
       return null;
   }

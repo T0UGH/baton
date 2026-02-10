@@ -14,7 +14,7 @@ import type { RepoInfo } from './types';
 
 const logger = createLogger('FeishuServer');
 
-export async function main(configPath?: string) {
+export async function main(configPath?: string, workDir?: string) {
   let adapter: FeishuAdapter | null = null;
 
   try {
@@ -29,7 +29,8 @@ export async function main(configPath?: string) {
       process.exit(1);
     }
 
-    const rootPath = config.project?.path || process.cwd();
+    // 优先使用命令行参数指定的工作目录，其次使用配置文件中的路径
+    const rootPath = workDir || config.project?.path || process.cwd();
 
     logger.info(`📂 扫描目录: ${rootPath}`);
 

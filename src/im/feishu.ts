@@ -190,14 +190,15 @@ export class FeishuAdapter extends BaseIMAdapter {
     const repoPath = session?.repoName || session?.projectPath || 'unknown';
 
     // 构建卡片内容 - 只保留核心对话内容
-    const elements: { type: 'markdown'; content: string }[] = [
+    const elements: ({ type: 'markdown'; content: string } | { type: 'hr' })[] = [
       {
         type: 'markdown',
         content: `**${toolName}**`,
       },
+      { type: 'hr' },
       {
         type: 'markdown',
-        content: `---\nSession ID: ${sessionId}`,
+        content: `🆔 ${sessionId}`,
       },
     ];
 
@@ -347,9 +348,10 @@ export class FeishuAdapter extends BaseIMAdapter {
               type: 'markdown',
               content: this.truncateMessage(response.message, 2000),
             },
+            { type: 'hr' },
             {
               type: 'markdown',
-              content: `---\nSession ID: ${session.id}`,
+              content: `🆔 ${session.id}`,
             },
           ],
         };
@@ -556,9 +558,10 @@ export class FeishuAdapter extends BaseIMAdapter {
           type: 'markdown',
           content: this.truncateMessage(response.message, 2000), // 飞书卡片长度限制
         },
+        { type: 'hr' },
         {
           type: 'markdown',
-          content: `---\nSession ID: ${session.id}`,
+          content: `🆔 ${session.id}`,
         },
       ],
     };

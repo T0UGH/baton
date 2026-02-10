@@ -12,7 +12,8 @@ export interface UniversalCard {
 export type CardElement =
   | { type: 'markdown'; content: string }
   | { type: 'text'; content: string }
-  | { type: 'field_group'; fields: { title: string; content: string }[] };
+  | { type: 'field_group'; fields: { title: string; content: string }[] }
+  | { type: 'hr' }; // 水平分割线
 
 export interface CardAction {
   id: string;

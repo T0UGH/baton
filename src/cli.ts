@@ -13,13 +13,6 @@ import { RepoManager } from './core/repo';
 import type { IMMessage, IMResponse, Session, RepoInfo } from './types';
 import type { PermissionOption, RequestPermissionRequest } from '@agentclientprotocol/sdk';
 
-const rootPath = process.cwd();
-
-console.log('╔════════════════════════════════════════╗');
-console.log('║           Baton CLI v0.1.0             ║');
-console.log('╚════════════════════════════════════════╝');
-console.log(`\nRoot: ${rootPath}`);
-
 // 权限请求事件类型
 interface PermissionRequestEvent {
   requestId: string;
@@ -27,7 +20,13 @@ interface PermissionRequestEvent {
 }
 
 // 模拟 IM 消息循环
-export async function main() {
+export async function main(workDir?: string) {
+  const rootPath = workDir || process.cwd();
+
+  console.log('╔════════════════════════════════════════╗');
+  console.log('║           Baton CLI v0.1.0             ║');
+  console.log('╚════════════════════════════════════════╝');
+  console.log(`\nRoot: ${rootPath}`);
   console.log('Type your message (or command), or "quit" to exit:\n');
 
   const mockUserId = 'local-user';
