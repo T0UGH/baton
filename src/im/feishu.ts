@@ -353,8 +353,13 @@ export class FeishuAdapter extends BaseIMAdapter {
     logger.info({ action: data.action }, 'Card action received');
 
     try {
-      const actionValue = data.action.value;
-      // 飞书 action.value 可能是对象也可能是字符串，这里我们之前 JSON.stringify 了
+      // 飞书卡片按钮的 value 结构是: { action_id: string, value: string }
+      // 我们实际的 payload 在 value.value 中
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+      const actionData = data.action.value as Record<string, unknown>;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      const actionValue = actionData?.value;
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let payload: any;
 
@@ -362,7 +367,7 @@ export class FeishuAdapter extends BaseIMAdapter {
       if (typeof actionValue === 'object') {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         payload = actionValue;
-      } else {
+      } else if (typeof actionValue === 'string') {
         try {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           payload = JSON.parse(actionValue);
@@ -370,6 +375,10 @@ export class FeishuAdapter extends BaseIMAdapter {
           logger.warn({ actionValue }, 'Failed to parse action value JSON');
           return;
         }
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        logger.warn({ actionData }, 'Invalid action value structure');
+        return;
       }
 
       // 检查是否是权限处理动作
