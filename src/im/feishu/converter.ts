@@ -69,7 +69,7 @@ function convertElement(element: CardElement): FeishuCard | null {
       return {
         tag: 'div',
         fields: element.fields.map(field => ({
-          is_short: true, // 默认都展示为短字段
+          is_short: true,
           text: {
             tag: 'lark_md',
             content: `**${field.title}**\n${field.content}`,
@@ -80,6 +80,19 @@ function convertElement(element: CardElement): FeishuCard | null {
     case 'hr':
       return {
         tag: 'hr',
+      };
+
+    case 'picker':
+      return {
+        tag: 'picker',
+        name: element.title,
+        options: element.options.map(opt => ({
+          text: {
+            tag: 'plain_text',
+            content: opt.name,
+          },
+          value: opt.optionId,
+        })),
       };
 
     default:

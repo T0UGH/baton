@@ -13,7 +13,13 @@ export type CardElement =
   | { type: 'markdown'; content: string }
   | { type: 'text'; content: string }
   | { type: 'field_group'; fields: { title: string; content: string }[] }
-  | { type: 'hr' }; // 水平分割线
+  | { type: 'hr' } // 水平分割线
+  | { type: 'picker'; title: string; options: PickerOption[] }; // 飞书选择框
+
+export interface PickerOption {
+  optionId: string;
+  name: string;
+}
 
 export interface CardAction {
   id: string;

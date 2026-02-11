@@ -161,7 +161,7 @@ export class FeishuAdapter extends BaseIMAdapter {
     });
   }
 
-  // 处理权限请求，发送交互卡片
+  // 处理权限请求，发送交互卡片（使用选择框）
   private async handlePermissionRequest(event: PermissionRequestEvent): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const { sessionId, requestId, request } = event;
@@ -189,46 +189,23 @@ export class FeishuAdapter extends BaseIMAdapter {
     const session = this.sessionManager.getSessionById(sessionId);
     const repoPath = session?.repoName || session?.projectPath || 'unknown';
 
-    // 构建卡片内容 - 只保留核心对话内容
-    const elements: ({ type: 'markdown'; content: string } | { type: 'hr' })[] = [
-      {
-        type: 'markdown',
-        content: `**${toolName}**`,
-      },
-      { type: 'hr' },
-      {
-        type: 'markdown',
-        content: `🆔 ${sessionId}`,
-      },
-    ];
-
-    // 构建动态按钮
-    const actions = options.map(opt => ({
-      id: `permission_${opt.optionId}`,
-      text: opt.name,
-      style: (opt.name.toLowerCase().includes('allow') || opt.name.toLowerCase().includes('yes')
-        ? 'primary'
-        : opt.name.toLowerCase().includes('deny') || opt.name.toLowerCase().includes('no')
-          ? 'danger'
-          : 'default') as 'primary' | 'danger' | 'default',
-      value: JSON.stringify({
-        action: 'resolve_permission',
-        session_id: sessionId,
-        request_id: requestId,
-        option_id: opt.optionId,
-      }),
-    }));
-
-    // 构建通用卡片 - 标题包含仓库路径
+    // 构建通用卡片 - 使用选择框
     const card: UniversalCard = {
       title: `🔐 ${repoPath}`,
-      elements,
-      actions: actions as unknown as {
-        id: string;
-        text: string;
-        style: 'primary' | 'danger' | 'default';
-        value: string;
-      }[],
+      elements: [
+        {
+          type: 'markdown',
+          content: `**${toolName}**\n\n请选择操作：`,
+        },
+        {
+          type: 'picker',
+          title: '选择操作',
+          options: options.map(opt => ({
+            optionId: opt.optionId,
+            name: opt.name,
+          })),
+        },
+      ],
     };
 
     // 发送卡片作为回复，并更新上下文 ID
@@ -376,20 +353,23 @@ export class FeishuAdapter extends BaseIMAdapter {
     logger.info({ action: data.action }, 'Card action received');
 
     try {
-      // 飞书卡片按钮的 value 结构是: { action_id: string, value: string }
-      // 我们实际的 payload 在 value.value 中
+      // 飞书卡片按钮和 picker 的 value 结构：
+      // 按钮: { action_id: string, value: string }
+      // picker: { action_id: string, value: { option_id: string } }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
       const actionData = data.action.value as Record<string, unknown>;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      const actionId = typeof actionData?.action_id === 'string' ? actionData.action_id : undefined;
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       const actionValue = actionData?.value;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let payload: any;
+      let payload: Record<string, unknown> = {};
 
-      // 尝试解析 payload
-      if (typeof actionValue === 'object') {
+      if (typeof actionValue === 'object' && actionValue !== null) {
+        // picker 返回的对象，直接赋值
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        payload = actionValue;
+        payload = actionValue as Record<string, unknown>;
       } else if (typeof actionValue === 'string') {
         try {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -398,42 +378,42 @@ export class FeishuAdapter extends BaseIMAdapter {
           logger.warn({ actionValue }, 'Failed to parse action value JSON');
           return;
         }
-      } else {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        logger.warn({ actionData }, 'Invalid action value structure');
-        return;
+      }
+
+      // 如果 picker 返回了 option_id，添加 action 字段
+      if ('option_id' in payload && !payload.action) {
+        payload.action = 'resolve_permission';
+      }
+
+      // 从 action_id 中提取信息（如果是从按钮来的）
+      if (actionId && actionId.startsWith('permission_')) {
+        payload.action = 'resolve_permission';
+        if (!payload.option_id) {
+          payload.option_id = actionId.replace('permission_', '');
+        }
       }
 
       // 检查是否是权限处理动作
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       if (payload.action === 'resolve_permission') {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const { session_id, request_id, option_id } = payload;
+        const session_id = payload.session_id as string;
+        const request_id = payload.request_id as string;
+        const option_id = payload.option_id as string;
 
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         logger.info(
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment
           { session_id, request_id, option_id },
           'Resolving permission from card interaction'
         );
 
         // 调用 SessionManager 解决权限
-        // 注意：resolveInteraction 是我们刚加的方法，需要确保 SessionManager 上有这个方法
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
         const result = this.sessionManager.resolveInteraction(session_id, request_id, option_id);
 
-        // 更新卡片或发送通知
-        // 飞书允许直接返回新的卡片内容来更新原卡片（Toast）
-        // 这里我们可以简单地返回一个 Toast
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any
+        // 返回 Toast 提示
         return {
           toast: {
             type: result.success ? 'success' : 'error',
             content: result.message,
           },
-          // 可选：更新原卡片状态，比如把按钮置灰
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any;
+        };
       }
     } catch (error) {
       logger.error(error, 'Error handling card action');
