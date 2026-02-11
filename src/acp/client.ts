@@ -387,6 +387,18 @@ export class ACPClient {
     logger.info(`[ACP] Agent stopped.`);
   }
 
+  // 获取 Agent 进程状态
+  getAgentStatus(): { pid: number | undefined; running: boolean } {
+    if (!this.agentProcess) {
+      return { pid: undefined, running: false };
+    }
+
+    const pid = this.agentProcess.pid;
+    const running = this.agentProcess.exitCode === null;
+
+    return { pid, running };
+  }
+
   async sendPrompt(prompt: string): Promise<IMResponse> {
     if (!this.connection || !this.currentSessionId) {
       throw new Error('Agent not initialized');

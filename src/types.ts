@@ -6,6 +6,7 @@
 
 import type { ACPClient } from './acp/client';
 import type { RequestPermissionRequest, SessionMode, ModelInfo } from '@agentclientprotocol/sdk';
+import type { UniversalCard } from './im/types';
 
 export interface Session {
   id: string;
@@ -64,6 +65,7 @@ export interface IMResponse {
   message: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data?: any;
+  card?: UniversalCard; // 卡片格式响应，优先使用
 }
 
 export type CommandType =

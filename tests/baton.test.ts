@@ -92,7 +92,12 @@ describe('Baton MVP Tests', () => {
     it('should parse /reset command', async () => {
       const response = await mockClient.sendMessage('/reset');
       assert.strictEqual(response.success, true);
-      assert.ok(response.message.includes('reset'));
+      assert.ok(
+        response.message.includes('reset') ||
+          response.message.includes('重置') ||
+          response.message.includes('已完全重置') ||
+          response.message.includes('complete')
+      );
     });
 
     it('should parse /mode command', async () => {

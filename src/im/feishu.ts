@@ -335,13 +335,19 @@ export class FeishuAdapter extends BaseIMAdapter {
       // 发送到指令分发器
       const response = await this.dispatcher.dispatch(imMessage);
 
-      // 发送初始回复卡片（所有回复都使用卡片格式）
-      if (response.message) {
+      // 发送回复（优先使用卡片格式）
+      if (response.card) {
+        // 使用返回的卡片
+        const newMessageId = await this.sendReply(message.chat_id, message.message_id, {
+          card: response.card,
+        });
+        this.updateSessionMessageContext(session.id, message.chat_id, newMessageId);
+      } else if (response.message) {
         // 获取仓库路径
         const repoPath = session.repoName || session.projectPath || 'unknown';
 
-        // 构建初始回复卡片
-        const initialCard: UniversalCard = {
+        // 构建默认回复卡片
+        const defaultCard: UniversalCard = {
           title: `💬 ${repoPath}`,
           elements: [
             {
@@ -357,7 +363,7 @@ export class FeishuAdapter extends BaseIMAdapter {
         };
 
         const newMessageId = await this.sendReply(message.chat_id, message.message_id, {
-          card: initialCard,
+          card: defaultCard,
         });
         this.updateSessionMessageContext(session.id, message.chat_id, newMessageId);
       }

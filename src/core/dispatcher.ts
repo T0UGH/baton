@@ -5,6 +5,7 @@
  * 支持 /repo 命令切换不同仓库，每个仓库有独立的会话
  */
 import type { IMMessage, IMResponse, ParsedCommand } from '../types';
+import type { UniversalCard } from '../im/types';
 import type { SessionManager } from './session';
 import type { TaskQueueEngine } from './queue';
 
@@ -112,6 +113,7 @@ export class CommandDispatcher {
       return {
         success: false,
         message: '仓库管理器未初始化',
+        card: this.createErrorCard('仓库管理器未初始化'),
       };
     }
 
@@ -120,6 +122,15 @@ export class CommandDispatcher {
       return {
         success: true,
         message: '未发现任何 Git 仓库',
+        card: {
+          title: '📦 仓库列表',
+          elements: [
+            {
+              type: 'markdown',
+              content: '未在指定目录下发现任何 Git 仓库',
+            },
+          ],
+        },
       };
     }
 
@@ -135,6 +146,7 @@ export class CommandDispatcher {
       return {
         success: false,
         message: `未找到仓库: ${identifier}`,
+        card: this.createErrorCard(`未找到仓库: ${identifier}`),
       };
     }
 
@@ -143,6 +155,19 @@ export class CommandDispatcher {
       return {
         success: true,
         message: `当前已在仓库: ${targetRepo.name}`,
+        card: {
+          title: '📦 仓库切换',
+          elements: [
+            {
+              type: 'markdown',
+              content: `ℹ️ 当前已在仓库：**${targetRepo.name}**`,
+            },
+            {
+              type: 'markdown',
+              content: `📂 路径: \`${targetRepo.path}\``,
+            },
+          ],
+        },
       };
     }
 
@@ -153,6 +178,36 @@ export class CommandDispatcher {
       success: true,
       message: `🔄 已切换到仓库: ${targetRepo.name}`,
       data: { repo: { name: targetRepo.name, path: targetRepo.path } },
+      card: {
+        title: '📦 仓库切换成功',
+        elements: [
+          {
+            type: 'markdown',
+            content: `✅ 已切换到仓库：**${targetRepo.name}**`,
+          },
+          {
+            type: 'markdown',
+            content: `📂 路径: \`${targetRepo.path}\``,
+          },
+          {
+            type: 'markdown',
+            content: '💡 新的会话将在下次发送消息时自动创建',
+          },
+        ],
+      },
+    };
+  }
+
+  // 辅助方法：创建错误卡片
+  private createErrorCard(message: string): UniversalCard {
+    return {
+      title: '❌ 操作失败',
+      elements: [
+        {
+          type: 'markdown',
+          content: message,
+        },
+      ],
     };
   }
 
@@ -178,9 +233,28 @@ export class CommandDispatcher {
         message.contextId
       );
       if (session.acpClient) {
-        return session.acpClient.setMode(mode);
+        const result = await session.acpClient.setMode(mode);
+        // 添加卡片格式
+        return {
+          ...result,
+          card: result.success
+            ? {
+                title: '🎨 模式切换',
+                elements: [
+                  {
+                    type: 'markdown' as const,
+                    content: `✅ **模式已切换为：** \`${mode}\``,
+                  },
+                ],
+              }
+            : this.createErrorCard(result.message),
+        };
       }
-      return { success: false, message: 'Agent 未启动' };
+      return {
+        success: false,
+        message: 'Agent 未启动',
+        card: this.createErrorCard('Agent 未启动'),
+      };
     }
     // 触发选择界面
     return this.sessionManager.triggerModeSelection(message.userId, message.contextId);
@@ -195,39 +269,85 @@ export class CommandDispatcher {
         message.contextId
       );
       if (session.acpClient) {
-        return session.acpClient.setModel(model);
+        const result = await session.acpClient.setModel(model);
+        // 添加卡片格式
+        return {
+          ...result,
+          card: result.success
+            ? {
+                title: '🤖 模型切换',
+                elements: [
+                  {
+                    type: 'markdown' as const,
+                    content: `✅ **模型已切换为：** \`${model}\``,
+                  },
+                ],
+              }
+            : this.createErrorCard(result.message),
+        };
       }
-      return { success: false, message: 'Agent 未启动' };
+      return {
+        success: false,
+        message: 'Agent 未启动',
+        card: this.createErrorCard('Agent 未启动'),
+      };
     }
     // 触发选择界面
     return this.sessionManager.triggerModelSelection(message.userId, message.contextId);
   }
 
   private handleHelp(): IMResponse {
-    const helpText = `
- **Baton 指令列表：**
-
- *系统指令：*
- - /repo [序号/名称] - 查看或切换仓库
- - /current - 查看当前会话状态
- - /stop [id/all] - 停止当前任务或清空队列
- - /reset - 重置会话（清除上下文）
- - /mode [name] - 查看或切换 Agent 模式
- - /model [name] - 查看或切换 AI 模型
- - /select <reqId> <optId/index> - 选择权限请求选项
- - /help - 显示此帮助
-
- *Agent 交互：*
- - 发送任意文本即可与 AI Agent 对话
- - 所有非指令文本都会转发给 Agent
-
- *权限说明：*
- - 敏感操作需用户确认，请使用数字序号回复或 IM 卡片进行交互
-    `.trim();
+    const helpCard: UniversalCard = {
+      title: '📚 Baton 指令帮助',
+      elements: [
+        {
+          type: 'markdown',
+          content: '**🔧 系统指令**',
+        },
+        {
+          type: 'markdown',
+          content: `
+• \`/repo [序号/名称]\` - 查看或切换仓库
+• \`/current\` - 查看当前会话状态
+• \`/stop [id/all]\` - 停止当前任务或清空队列
+• \`/reset\` - 重置会话（清除上下文）
+• \`/mode [name]\` - 查看或切换 Agent 模式
+• \`/model [name]\` - 查看或切换 AI 模型
+• \`/help\` - 显示此帮助
+          `.trim(),
+        },
+        {
+          type: 'hr',
+        },
+        {
+          type: 'markdown',
+          content: '**💬 Agent 交互**',
+        },
+        {
+          type: 'markdown',
+          content: `
+• 发送任意文本即可与 AI Agent 对话
+• 所有非指令文本都会转发给 Agent
+          `.trim(),
+        },
+        {
+          type: 'hr',
+        },
+        {
+          type: 'markdown',
+          content: '**⚡ 权限说明**',
+        },
+        {
+          type: 'markdown',
+          content: '敏感操作需用户确认，请使用数字序号回复或 IM 卡片进行交互',
+        },
+      ],
+    };
 
     return {
       success: true,
-      message: helpText,
+      message: 'Baton 指令帮助已发送',
+      card: helpCard,
     };
   }
 

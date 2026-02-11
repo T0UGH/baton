@@ -5,9 +5,11 @@
  * 支持多仓库切换，每个仓库有独立的 session
  */
 import type { Session, IMResponse, RepoInfo } from '../types';
+import type { UniversalCard } from '../im/types';
 import { ACPClient } from '../acp/client';
 import { createLogger } from '../utils/logger';
 import { EventEmitter } from 'node:events';
+import * as path from 'node:path';
 import type { RequestPermissionRequest, PermissionOption } from '@agentclientprotocol/sdk';
 import { RepoManager } from './repo';
 
@@ -169,12 +171,20 @@ export class SessionManager extends EventEmitter {
     }
 
     if (!session) {
-      return { success: false, message: 'Session not found' };
+      return {
+        success: false,
+        message: 'Session not found',
+        card: this.createStatusCard('交互处理', '会话不存在', false),
+      };
     }
 
     const pending = session.pendingInteractions.get(requestId);
     if (!pending) {
-      return { success: false, message: 'Permission request not found or expired' };
+      return {
+        success: false,
+        message: 'Permission request not found or expired',
+        card: this.createStatusCard('交互处理', '请求不存在或已过期', false),
+      };
     }
 
     let finalOptionId = optionIdOrIndex;
@@ -191,6 +201,7 @@ export class SessionManager extends EventEmitter {
         return {
           success: false,
           message: `无效的选项: ${optionIdOrIndex}。可选: ${options.map(o => o.optionId).join(', ')} 或序号 0-${options.length - 1}`,
+          card: this.createStatusCard('交互处理', `无效的选项: ${optionIdOrIndex}`, false),
         };
       }
     }
@@ -200,7 +211,11 @@ export class SessionManager extends EventEmitter {
     session.pendingInteractions.delete(requestId);
 
     logger.info({ sessionId, requestId, finalOptionId }, 'Interaction resolved by user');
-    return { success: true, message: `已选择选项: ${finalOptionId}` };
+    return {
+      success: true,
+      message: `已选择选项: ${finalOptionId}`,
+      card: this.createStatusCard('交互处理', `已选择选项: ${finalOptionId}`),
+    };
   }
 
   // 创建仓库选择交互
@@ -216,6 +231,7 @@ export class SessionManager extends EventEmitter {
       return {
         success: false,
         message: '当前有待处理的选择，请先完成后再试',
+        card: this.createStatusCard('仓库选择', '当前有待处理的选择，请先完成后再试', false),
       };
     }
 
@@ -233,15 +249,45 @@ export class SessionManager extends EventEmitter {
               resolve({
                 success: true,
                 message: `🔄 已切换到仓库: ${targetRepo.name}`,
+                card: {
+                  title: '📦 仓库切换成功',
+                  elements: [
+                    {
+                      type: 'markdown',
+                      content: `✅ 已切换到仓库：**${targetRepo.name}**`,
+                    },
+                    {
+                      type: 'markdown',
+                      content: `📂 路径: \`${targetRepo.path}\``,
+                    },
+                    {
+                      type: 'markdown',
+                      content: '💡 新的会话将在下次发送消息时自动创建',
+                    },
+                  ],
+                },
               });
             } else {
-              resolve({ success: false, message: `未找到仓库: ${optionId}` });
+              resolve({
+                success: false,
+                message: `未找到仓库: ${optionId}`,
+                card: this.createStatusCard('仓库切换', `未找到仓库: ${optionId}`, false),
+              });
             }
           } else {
-            resolve({ success: false, message: '仓库管理器未初始化' });
+            resolve({
+              success: false,
+              message: '仓库管理器未初始化',
+              card: this.createStatusCard('仓库切换', '仓库管理器未初始化', false),
+            });
           }
         },
-        reject: () => resolve({ success: false, message: '已取消' }),
+        reject: () =>
+          resolve({
+            success: false,
+            message: '已取消',
+            card: this.createStatusCard('仓库选择', '已取消', false),
+          }),
         timestamp: Date.now(),
         data: {
           title: '选择仓库',
@@ -284,15 +330,98 @@ export class SessionManager extends EventEmitter {
     const sessionKey = this.buildSessionKey(userId, contextId);
     const session = sessions.get(sessionKey);
 
-    if (session?.acpClient) {
+    if (!session) {
+      return {
+        success: true,
+        message: '🔄 会话重置完成（无活跃会话）',
+        card: this.createStatusCard('重置会话', '会话重置完成（无活跃会话）'),
+      };
+    }
+
+    const repoName = session.repoName || path.basename(session.projectPath);
+
+    let wasRunning = false;
+    let pid: number | undefined;
+    if (session.acpClient && typeof session.acpClient.getAgentStatus === 'function') {
+      const agentStatus = session.acpClient.getAgentStatus();
+      wasRunning = agentStatus.running;
+      pid = agentStatus.pid;
+    } else if (session.acpClient) {
+      wasRunning = true;
+    }
+
+    // 1. 取消当前任务
+    if (session.queue.current && session.acpClient) {
+      await session.acpClient.cancelCurrentTask();
+    }
+
+    // 2. 停止 Agent 进程
+    if (session.acpClient) {
       await session.acpClient.stop();
     }
 
+    // 3. 清理所有待处理交互
+    const pendingCount = session.pendingInteractions.size;
+    for (const [requestId, interaction] of session.pendingInteractions) {
+      interaction.reject('Session reset');
+      session.pendingInteractions.delete(requestId);
+    }
+
+    // 4. 清空队列
+    const queueCount = session.queue.pending.length;
+    session.queue.pending = [];
+    session.queue.current = null;
+    session.isProcessing = false;
+
+    // 5. 删除会话
     sessions.delete(sessionKey);
+
+    logger.info({ userId, contextId, repoName, wasRunning, pid }, 'Session reset complete');
+
+    const elements: { type: 'markdown'; content: string }[] = [
+      {
+        type: 'markdown',
+        content: `✅ **会话已完全重置**`,
+      },
+      {
+        type: 'markdown',
+        content: `📁 **项目：** \`${repoName}\``,
+      },
+    ];
+
+    if (wasRunning && pid) {
+      elements.push({
+        type: 'markdown',
+        content: `🤖 **Agent：** 已终止 (PID: \`${pid}\`)`,
+      });
+    }
+
+    if (pendingCount > 0) {
+      elements.push({
+        type: 'markdown',
+        content: `🔓 **清理交互：** ${pendingCount} 个待处理请求已取消`,
+      });
+    }
+
+    if (queueCount > 0) {
+      elements.push({
+        type: 'markdown',
+        content: `📬 **清空队列：** ${queueCount} 个待执行任务`,
+      });
+    }
+
+    elements.push({
+      type: 'markdown',
+      content: `\n💡 下次发送消息时将自动创建新的会话`,
+    });
 
     return {
       success: true,
-      message: 'Session reset successfully. All context cleared.',
+      message: `✅ 会话重置完成：${repoName}。Agent 已终止，${queueCount} 个任务已清理，${pendingCount} 个交互已取消。`,
+      card: {
+        title: `🔄 重置会话 - ${repoName}`,
+        elements,
+      },
     };
   }
 
@@ -301,21 +430,109 @@ export class SessionManager extends EventEmitter {
     if (!session) {
       return {
         success: true,
-        message: 'No active session.',
+        message: '当前没有活跃的会话',
+        card: this.createStatusCard('会话状态', '当前没有活跃的会话'),
       };
     }
 
-    const queueInfo = {
-      current: session.queue.current,
-      pending: session.queue.pending,
-      pendingCount: session.queue.pending.length,
-      isProcessing: session.isProcessing,
+    // 获取 Agent 状态
+    let pid: number | undefined;
+    let running = false;
+    if (session.acpClient && typeof session.acpClient.getAgentStatus === 'function') {
+      const agentStatus = session.acpClient.getAgentStatus();
+      pid = agentStatus.pid;
+      running = agentStatus.running;
+    } else if (session.acpClient) {
+      // 如果 acpClient 存在但没有 getAgentStatus 方法，假设运行中
+      running = true;
+    }
+
+    // 构建状态信息
+    const statusIcon = running ? '🟢' : '🔴';
+    const statusText = running ? '运行中' : '已停止';
+    const repoName = session.repoName || path.basename(session.projectPath);
+
+    // 构建卡片元素
+    const elements: { type: 'markdown'; content: string }[] = [
+      {
+        type: 'markdown' as const,
+        content: `**📁 项目：** \`${repoName}\`\n**📂 路径：** \`${session.projectPath}\``,
+      },
+      {
+        type: 'markdown' as const,
+        content: `**🤖 Agent：** ${statusIcon} ${statusText}${pid ? ` | PID: \`${pid}\`` : ''}`,
+      },
+    ];
+
+    // 当前任务
+    if (session.queue.current) {
+      elements.push({
+        type: 'markdown' as const,
+        content: `**📋 当前任务：**\n\`\`\`\n${session.queue.current.content.substring(0, 100)}${session.queue.current.content.length > 100 ? '...' : ''}\n\`\`\`\n🆔 \`${session.queue.current.id.substring(0, 8)}...\``,
+      });
+    } else {
+      elements.push({
+        type: 'markdown' as const,
+        content: `**📋 当前任务：** 🕐 空闲`,
+      });
+    }
+
+    // 待执行队列
+    if (session.queue.pending.length > 0) {
+      const queueList = session.queue.pending
+        .map(
+          (task, idx) =>
+            `${idx + 1}. \`${task.content.substring(0, 50)}${task.content.length > 50 ? '...' : ''}\``
+        )
+        .join('\n');
+      elements.push({
+        type: 'markdown' as const,
+        content: `**📬 待执行队列 (${session.queue.pending.length} 个)：**\n${queueList}`,
+      });
+    }
+
+    const card: UniversalCard = {
+      title: `📊 会话状态 - ${repoName}`,
+      elements: elements,
     };
+
+    // 构建文本消息（兼容非卡片客户端）
+    let messageText = `📁 项目: ${repoName}\n`;
+    messageText += `📂 路径: ${session.projectPath}\n`;
+    messageText += `🤖 Agent: ${statusText}${pid ? ` (PID: ${pid})` : ''}\n`;
+    if (session.queue.current) {
+      messageText += `📋 当前任务: ${session.queue.current.content.substring(0, 50)}...\n`;
+    } else {
+      messageText += `📋 当前任务: 空闲\n`;
+    }
+    messageText += `📬 待执行队列: ${session.queue.pending.length} 个任务`;
 
     return {
       success: true,
-      message: `Queue status: ${queueInfo.pendingCount} pending, ${session.isProcessing ? 'processing' : 'idle'}`,
-      data: queueInfo,
+      message: messageText,
+      data: {
+        repoName,
+        projectPath: session.projectPath,
+        agentStatus: { pid, running },
+        current: session.queue.current,
+        pending: session.queue.pending,
+        pendingCount: session.queue.pending.length,
+        isProcessing: session.isProcessing,
+      },
+      card,
+    };
+  }
+
+  // 辅助方法：创建状态卡片
+  private createStatusCard(title: string, message: string, success: boolean = true): UniversalCard {
+    return {
+      title: `${success ? '✅' : '❌'} ${title}`,
+      elements: [
+        {
+          type: 'markdown',
+          content: message,
+        },
+      ],
     };
   }
 
@@ -324,22 +541,44 @@ export class SessionManager extends EventEmitter {
     if (!session) {
       return {
         success: false,
-        message: 'No active session.',
+        message: '当前没有活跃的会话',
+        card: this.createStatusCard('停止任务', '当前没有活跃的会话', false),
       };
     }
 
+    const repoName = session.repoName || path.basename(session.projectPath);
+
     if (taskId === 'all') {
       // 停止当前任务并清空队列
+      const stoppedCurrent = session.queue.current !== null;
       if (session.queue.current && session.acpClient) {
         await session.acpClient.cancelCurrentTask();
       }
+      const queueCount = session.queue.pending.length;
       session.queue.pending = [];
       session.queue.current = null;
       session.isProcessing = false;
 
+      const message = stoppedCurrent
+        ? `✅ 已停止当前任务，并清空队列中的 ${queueCount} 个待执行任务`
+        : `✅ 已清空队列中的 ${queueCount} 个待执行任务`;
+
       return {
         success: true,
-        message: 'All tasks stopped and queue cleared.',
+        message,
+        card: {
+          title: `🛑 停止任务 - ${repoName}`,
+          elements: [
+            {
+              type: 'markdown',
+              content: message,
+            },
+            {
+              type: 'markdown',
+              content: `📬 当前队列状态：**空闲**`,
+            },
+          ],
+        },
       };
     }
 
@@ -347,33 +586,67 @@ export class SessionManager extends EventEmitter {
       // 移除指定任务
       const index = session.queue.pending.findIndex(t => t.id === taskId);
       if (index > -1) {
-        session.queue.pending.splice(index, 1);
+        const removedTask = session.queue.pending.splice(index, 1)[0];
         return {
           success: true,
-          message: `Task ${taskId} removed from queue.`,
+          message: `✅ 已移除任务: ${removedTask.content.substring(0, 50)}...`,
+          card: {
+            title: `🗑️ 移除任务 - ${repoName}`,
+            elements: [
+              {
+                type: 'markdown',
+                content: `✅ 已成功移除队列中的任务\n\`\`\`\n${removedTask.content.substring(0, 100)}${removedTask.content.length > 100 ? '...' : ''}\n\`\`\``,
+              },
+              {
+                type: 'markdown',
+                content: `🆔 任务ID: \`${taskId.substring(0, 8)}...\`\n📬 剩余任务: **${session.queue.pending.length}**`,
+              },
+            ],
+          },
         };
       }
       return {
         success: false,
-        message: `Task ${taskId} not found in queue.`,
+        message: `❌ 未找到任务: ${taskId}`,
+        card: this.createStatusCard('移除任务', `未找到任务: ${taskId.substring(0, 8)}...`, false),
       };
     }
 
     // 默认停止当前任务
     if (session.queue.current && session.acpClient) {
+      const stoppedTask = session.queue.current;
       await session.acpClient.cancelCurrentTask();
       session.queue.current = null;
       session.isProcessing = false;
 
+      // 如果队列还有任务，自动开始下一个
+      if (session.queue.pending.length > 0) {
+        // 注意：这里不自动执行下一个，由队列引擎处理
+      }
+
       return {
         success: true,
-        message: 'Current task stopped.',
+        message: `✅ 已停止当前任务`,
+        card: {
+          title: `🛑 停止任务 - ${repoName}`,
+          elements: [
+            {
+              type: 'markdown',
+              content: `✅ 已成功停止当前任务`,
+            },
+            {
+              type: 'markdown',
+              content: `📋 已停止: \`${stoppedTask.content.substring(0, 50)}...\`\n📬 剩余队列: **${session.queue.pending.length}**`,
+            },
+          ],
+        },
       };
     }
 
     return {
       success: true,
-      message: 'No running task to stop.',
+      message: '🕐 没有正在运行的任务',
+      card: this.createStatusCard('停止任务', '没有正在运行的任务'),
     };
   }
 
@@ -386,13 +659,22 @@ export class SessionManager extends EventEmitter {
       return {
         success: false,
         message: '当前已有待处理的权限请求，请先处理完当前请求再试',
+        card: this.createStatusCard(
+          '模式切换',
+          '当前已有待处理的权限请求，请先处理完当前请求再试',
+          false
+        ),
       };
     }
 
     const state = session.acpClient?.getModeState();
 
     if (!state || state.availableModes.length === 0) {
-      return { success: false, message: '当前 Agent 不支持模式切换' };
+      return {
+        success: false,
+        message: '当前 Agent 不支持模式切换',
+        card: this.createStatusCard('模式切换', '当前 Agent 不支持模式切换', false),
+      };
     }
 
     // 构建一个模拟的权限请求来复用选择逻辑
@@ -417,10 +699,28 @@ export class SessionManager extends EventEmitter {
           if (session.acpClient) {
             const res = await session.acpClient.setMode(optionId);
             session.currentModeId = optionId;
-            resolve(res);
+            resolve({
+              ...res,
+              card: res.success
+                ? {
+                    title: '🎨 模式切换成功',
+                    elements: [
+                      {
+                        type: 'markdown',
+                        content: `✅ **模式已切换为：** \`${optionId}\``,
+                      },
+                    ],
+                  }
+                : this.createStatusCard('模式切换', res.message, false),
+            });
           }
         },
-        reject: () => resolve({ success: false, message: '已取消' }),
+        reject: () =>
+          resolve({
+            success: false,
+            message: '已取消',
+            card: this.createStatusCard('模式选择', '已取消', false),
+          }),
         timestamp: Date.now(),
         data: {
           title: fakeReq.toolCall.title ?? '选择',
@@ -446,13 +746,22 @@ export class SessionManager extends EventEmitter {
       return {
         success: false,
         message: '当前已有待处理的权限请求，请先处理完当前请求再试',
+        card: this.createStatusCard(
+          '模型切换',
+          '当前已有待处理的权限请求，请先处理完当前请求再试',
+          false
+        ),
       };
     }
 
     const state = session.acpClient?.getModelState();
 
     if (!state || state.availableModels.length === 0) {
-      return { success: false, message: '当前 Agent 不支持模型切换' };
+      return {
+        success: false,
+        message: '当前 Agent 不支持模型切换',
+        card: this.createStatusCard('模型切换', '当前 Agent 不支持模型切换', false),
+      };
     }
 
     // 构建一个模拟的权限请求来复用选择逻辑
@@ -477,10 +786,28 @@ export class SessionManager extends EventEmitter {
           if (session.acpClient) {
             const res = await session.acpClient.setModel(optionId);
             session.currentModelId = optionId;
-            resolve(res);
+            resolve({
+              ...res,
+              card: res.success
+                ? {
+                    title: '🤖 模型切换成功',
+                    elements: [
+                      {
+                        type: 'markdown',
+                        content: `✅ **模型已切换为：** \`${optionId}\``,
+                      },
+                    ],
+                  }
+                : this.createStatusCard('模型切换', res.message, false),
+            });
           }
         },
-        reject: () => resolve({ success: false, message: '已取消' }),
+        reject: () =>
+          resolve({
+            success: false,
+            message: '已取消',
+            card: this.createStatusCard('模型选择', '已取消', false),
+          }),
         timestamp: Date.now(),
         data: {
           title: fakeReq.toolCall.title ?? '选择',
