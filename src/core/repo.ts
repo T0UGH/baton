@@ -152,4 +152,19 @@ export class RepoManager {
   getRootPath(): string {
     return this.rootPath;
   }
+
+  addRepo(repo: RepoInfo): void {
+    // 检查是否已存在
+    const exists = this.repos.some(r => r.path === repo.path);
+    if (!exists) {
+      this.repos.push(repo);
+      // 重新排序
+      this.repos.sort((a, b) => {
+        const depthA = a.path.split(path.sep).length;
+        const depthB = b.path.split(path.sep).length;
+        if (depthA !== depthB) return depthA - depthB;
+        return a.name.localeCompare(b.name);
+      });
+    }
+  }
 }

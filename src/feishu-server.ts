@@ -50,6 +50,8 @@ export async function main(configPath?: string, workDir?: string) {
         path: rootPath,
         gitPath: path.join(rootPath, '.git'),
       };
+      // 将当前目录添加到 repoManager，以便 /repo 命令可以显示
+      repoManager.addRepo(selectedRepo);
     } else if (repos.length === 1) {
       selectedRepo = repos[0];
       logger.info(`📂 当前仓库: ${selectedRepo.name}`);
