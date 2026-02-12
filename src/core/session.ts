@@ -322,7 +322,7 @@ export class SessionManager extends EventEmitter {
           toolCall: { title: '📦 选择仓库', toolCallId: 'repo_selection' },
           options: repos.map(r => ({
             optionId: String(r.index),
-            name: `${r.name} (${r.path})`,
+            name: r.name,
             kind: 'allow_once' as const,
           })),
         },
