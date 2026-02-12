@@ -619,11 +619,6 @@ export class FeishuAdapter extends BaseIMAdapter {
     const newMessageId = await this.sendReply(chatId, messageId, { card: completionCard });
     this.updateSessionMessageContext(session.id, chatId, newMessageId);
 
-    // 添加完成 reaction (给最后一条消息加)
-    if (newMessageId) {
-      await this.addReaction(chatId, newMessageId, 'OK').catch(() => {});
-    }
-
     logger.info({ sessionId: session.id, chatId }, 'Task completed and rich card sent');
   }
 
