@@ -36,16 +36,6 @@ jobs:
       - name: Build binary
         run: bun build --compile src/index.ts --outfile baton
 
-      - name: Install UPX
-        uses: crazy-max/ghaction-upx@v3
-        with:
-          install-only: true
-
-      - name: Compress binary with UPX
-        run: |
-          upx --best --lzma baton
-          ls -lh baton
-
       - name: Create tarball
         run: |
           tar -czf baton-${{ matrix.target }}.tar.gz baton
