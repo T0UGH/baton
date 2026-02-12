@@ -34,12 +34,12 @@ export interface FeishuConfig {
 }
 
 export interface ACPConfig {
-  // Agent 命令
-  command: string;
-  args: string[];
+  // 自定义 Agent 启动命令（可选，不填则按 executor 使用内置命令）
+  command?: string;
+  args?: string[];
 
-  // 工作目录
-  cwd: string;
+  // 自定义工作目录（可选，支持相对路径）
+  cwd?: string;
 
   // 环境变量
   env?: Record<string, string>;
@@ -65,8 +65,6 @@ export const DEFAULT_CONFIG: Partial<BatonConfig> = {
     name: 'default',
   },
   acp: {
-    command: 'opencode',
-    args: ['acp'],
-    cwd: process.cwd(),
+    executor: 'opencode',
   },
 };

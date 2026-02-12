@@ -51,6 +51,8 @@ Baton 基于 [ACP 协议](https://agentclientprotocol.org/)，目前支持以下
 | Runtime      | 命令           | 说明                            |
 | ------------ | -------------- | ------------------------------- |
 | **opencode** | `opencode acp` | 默认，需全局安装 `opencode` CLI |
+| **codex**    | `codex-acp`    | 需可执行的 `codex-acp` 命令     |
+| **claude**   | `claude-code-acp` | 需可执行的 `claude-code-acp` 命令 |
 
 > ACP 是开放协议，未来将支持更多兼容 ACP 的 Runtime。
 
@@ -70,8 +72,40 @@ Baton 基于 [ACP 协议](https://agentclientprotocol.org/)，目前支持以下
     "appId": "cli_xxxxxxxxxxxxxxxx",
     "appSecret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "domain": "feishu"
+  },
+  "acp": {
+    "executor": "opencode"
   }
 }
+```
+
+### 1.1 自定义 ACP 启动命令（可选）
+
+如果你希望 Baton 启动自定义 ACP 进程（例如指定二进制路径或参数），可以在配置里增加 `acp.command`：
+
+```json
+{
+  "acp": {
+    "executor": "codex",
+    "command": "codex-acp",
+    "args": [],
+    "cwd": ".",
+    "env": {
+      "OPENAI_API_KEY": "sk-***"
+    }
+  }
+}
+```
+
+- `executor`：用于选择默认内置命令（`opencode`/`codex`/`claude-code`）
+- `command` + `args`：填写后会覆盖默认命令
+- `cwd`：ACP 进程工作目录；相对路径基于当前仓库根目录
+- `env`：仅注入给 ACP 子进程的环境变量
+
+也可以直接用环境变量切换 executor：
+
+```bash
+export BATON_EXECUTOR=codex
 ```
 
 或使用环境变量（推荐用于敏感信息）：
@@ -103,4 +137,4 @@ baton cli
 
 ## License
 
-Apache 2.0 © 2024 Baton Contributors
+Apache 2.0 © Baton Contributors

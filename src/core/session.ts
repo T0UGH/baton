@@ -6,7 +6,7 @@
  */
 import type { Session, IMResponse, RepoInfo } from '../types';
 import type { UniversalCard } from '../im/types';
-import { ACPClient } from '../acp/client';
+import { ACPClient, type ACPLaunchConfig } from '../acp/client';
 import { createLogger } from '../utils/logger';
 import { EventEmitter } from 'node:events';
 import * as path from 'node:path';
@@ -33,11 +33,17 @@ export class SessionManager extends EventEmitter {
   private repoManager: RepoManager | null = null;
   private currentRepoInfo: RepoInfo | null = null;
   private executor: string;
+  private acpLaunchConfig?: ACPLaunchConfig;
 
-  constructor(permissionTimeoutSeconds: number = 300, executor: string = 'opencode') {
+  constructor(
+    permissionTimeoutSeconds: number = 300,
+    executor: string = 'opencode',
+    acpLaunchConfig?: ACPLaunchConfig
+  ) {
     super();
     this.permissionTimeout = permissionTimeoutSeconds * 1000;
     this.executor = executor;
+    this.acpLaunchConfig = acpLaunchConfig;
   }
 
   setRepoManager(repoManager: RepoManager): void {
@@ -149,7 +155,12 @@ export class SessionManager extends EventEmitter {
         });
       };
 
-      const acpClient = new ACPClient(session.projectPath, permissionHandler, this.executor);
+      const acpClient = new ACPClient(
+        session.projectPath,
+        permissionHandler,
+        this.executor,
+        this.acpLaunchConfig
+      );
       await acpClient.startAgent();
       session.acpClient = acpClient;
 

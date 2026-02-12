@@ -33,6 +33,12 @@ const logger = createLogger('ACPClient');
 
 // 权限处理回调类型
 export type PermissionHandler = (params: RequestPermissionRequest) => Promise<string>;
+export interface ACPLaunchConfig {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+}
 
 /**
  * 扩展的 ACP 会话状态
@@ -300,43 +306,62 @@ export class ACPClient {
   private batonClient: BatonClient;
   private currentSessionId: string | null = null;
   private executor: string;
+  private launchConfig?: ACPLaunchConfig;
 
   constructor(
     projectPath: string,
     permissionHandler: PermissionHandler,
-    executor: string = 'opencode'
+    executor: string = 'opencode',
+    launchConfig?: ACPLaunchConfig
   ) {
     this.projectPath = projectPath;
     this.batonClient = new BatonClient(permissionHandler);
     this.executor = executor;
+    this.launchConfig = launchConfig;
   }
 
   async startAgent(): Promise<void> {
-    // 根据 executor 类型确定启动命令
+    // 优先使用显式配置的自定义命令，否则根据 executor 类型确定启动命令
     let command: string;
     let args: string[];
+    let cwd = this.projectPath;
+    let env: Record<string, string | undefined> = process.env;
 
-    switch (this.executor) {
-      case 'claude-code':
-        command = 'claude-code-acp';
-        args = [];
-        break;
-      case 'codex':
-        command = 'codex-acp';
-        args = [];
-        break;
-      case 'opencode':
-      default:
-        command = 'opencode';
-        args = ['acp'];
-        break;
+    if (this.launchConfig?.command) {
+      command = this.launchConfig.command;
+      args = this.launchConfig.args || [];
+      if (this.launchConfig.cwd) {
+        cwd = path.isAbsolute(this.launchConfig.cwd)
+          ? this.launchConfig.cwd
+          : path.resolve(this.projectPath, this.launchConfig.cwd);
+      }
+      if (this.launchConfig.env) {
+        env = { ...process.env, ...this.launchConfig.env };
+      }
+    } else {
+      switch (this.executor) {
+        case 'claude-code':
+          command = 'claude-code-acp';
+          args = [];
+          break;
+        case 'codex':
+          command = 'codex-acp';
+          args = [];
+          break;
+        case 'opencode':
+        default:
+          command = 'opencode';
+          args = ['acp'];
+          break;
+      }
     }
 
-    logger.info(`[ACP] Starting ${this.executor} (${command}) in ${this.projectPath}`);
+    logger.info(`[ACP] Starting ${this.executor} (${command} ${args.join(' ')}) in ${cwd}`);
 
     // 启动 ACP 进程
     this.agentProcess = spawn(command, args, {
-      cwd: this.projectPath,
+      cwd,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

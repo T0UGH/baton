@@ -83,6 +83,15 @@ function loadEnvConfig(): Partial<BatonConfig> {
     };
   }
 
+  // 从环境变量读取 ACP executor（兼容下划线写法）
+  const executor = process.env.BATON_EXECUTOR?.replace(/_/g, '-');
+  if (executor) {
+    envConfig.acp = {
+      ...(envConfig.acp || {}),
+      executor: executor as NonNullable<BatonConfig['acp']>['executor'],
+    };
+  }
+
   return envConfig;
 }
 
@@ -106,10 +115,11 @@ function mergeConfigs(
     },
     feishu: envConfig.feishu || fileConfig.feishu,
     acp: {
-      command: envConfig.acp?.command || fileConfig.acp?.command || DEFAULT_CONFIG.acp!.command,
-      args: envConfig.acp?.args || fileConfig.acp?.args || DEFAULT_CONFIG.acp!.args,
-      cwd: envConfig.acp?.cwd || fileConfig.acp?.cwd || DEFAULT_CONFIG.acp!.cwd,
+      command: envConfig.acp?.command || fileConfig.acp?.command,
+      args: envConfig.acp?.args || fileConfig.acp?.args,
+      cwd: envConfig.acp?.cwd || fileConfig.acp?.cwd,
       env: envConfig.acp?.env || fileConfig.acp?.env,
+      executor: envConfig.acp?.executor || fileConfig.acp?.executor || DEFAULT_CONFIG.acp?.executor,
     },
   };
 

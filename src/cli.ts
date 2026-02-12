@@ -65,17 +65,31 @@ export async function main(workDir?: string) {
     console.log(`📂 当前仓库: ${selectedRepo.name}\n`);
   }
 
-  // 加载配置获取 executor 设置
+  // 加载配置获取 executor 与自定义 ACP 启动配置
   let executor = 'opencode';
+  let acpLaunchConfig:
+    | { command: string; args?: string[]; cwd?: string; env?: Record<string, string> }
+    | undefined;
   try {
     const config = loadConfig();
-    executor = config.acp?.executor || process.env.BATON_EXECUTOR || 'opencode';
+    executor = (config.acp?.executor || process.env.BATON_EXECUTOR || 'opencode').replace(
+      /_/g,
+      '-'
+    );
+    if (config.acp?.command) {
+      acpLaunchConfig = {
+        command: config.acp.command,
+        args: config.acp.args,
+        cwd: config.acp.cwd,
+        env: config.acp.env,
+      };
+    }
   } catch {
     // 配置加载失败时使用默认值
   }
 
   // 创建会话管理器
-  const sessionManager = new SessionManager(300, executor);
+  const sessionManager = new SessionManager(300, executor, acpLaunchConfig);
   sessionManager.setRepoManager(repoManager);
   sessionManager.setCurrentRepo(selectedRepo);
 

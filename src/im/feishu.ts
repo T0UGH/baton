@@ -102,12 +102,24 @@ export class FeishuAdapter extends BaseIMAdapter {
       domain: config.feishu.domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu,
     });
 
-    // 创建会话管理器，支持自定义 executor（环境变量值可用下划线或中划线）
+    // 创建会话管理器，支持自定义 executor 和 ACP 启动命令
     const executor = (config.acp?.executor || process.env.BATON_EXECUTOR || 'opencode').replace(
       /_/g,
       '-'
     );
-    this.sessionManager = new SessionManager(config.feishu.card?.permissionTimeout, executor);
+    const acpLaunchConfig = config.acp?.command
+      ? {
+          command: config.acp.command,
+          args: config.acp.args,
+          cwd: config.acp.cwd,
+          env: config.acp.env,
+        }
+      : undefined;
+    this.sessionManager = new SessionManager(
+      config.feishu.card?.permissionTimeout,
+      executor,
+      acpLaunchConfig
+    );
 
     if (repoManager && selectedRepo) {
       this.sessionManager.setRepoManager(repoManager);
