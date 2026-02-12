@@ -299,17 +299,43 @@ export class ACPClient {
   private connection: acp.ClientSideConnection | null = null;
   private batonClient: BatonClient;
   private currentSessionId: string | null = null;
+  private executor: string;
 
-  constructor(projectPath: string, permissionHandler: PermissionHandler) {
+  constructor(
+    projectPath: string,
+    permissionHandler: PermissionHandler,
+    executor: string = 'opencode'
+  ) {
     this.projectPath = projectPath;
     this.batonClient = new BatonClient(permissionHandler);
+    this.executor = executor;
   }
 
   async startAgent(): Promise<void> {
-    logger.info(`[ACP] Starting opencode acp in ${this.projectPath}`);
+    // 根据 executor 类型确定启动命令
+    let command: string;
+    let args: string[];
 
-    // 启动 opencode acp 进程
-    this.agentProcess = spawn('opencode', ['acp'], {
+    switch (this.executor) {
+      case 'claude-code':
+        command = 'claude-code-acp';
+        args = [];
+        break;
+      case 'codex':
+        command = 'codex-acp';
+        args = [];
+        break;
+      case 'opencode':
+      default:
+        command = 'opencode';
+        args = ['acp'];
+        break;
+    }
+
+    logger.info(`[ACP] Starting ${this.executor} (${command}) in ${this.projectPath}`);
+
+    // 启动 ACP 进程
+    this.agentProcess = spawn(command, args, {
       cwd: this.projectPath,
       stdio: ['pipe', 'pipe', 'pipe'],
     });

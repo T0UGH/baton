@@ -31,10 +31,12 @@ export class SessionManager extends EventEmitter {
   private permissionTimeout: number;
   private repoManager: RepoManager | null = null;
   private currentRepoInfo: RepoInfo | null = null;
+  private executor: string;
 
-  constructor(permissionTimeoutSeconds: number = 300) {
+  constructor(permissionTimeoutSeconds: number = 300, executor: string = 'opencode') {
     super();
     this.permissionTimeout = permissionTimeoutSeconds * 1000;
+    this.executor = executor;
   }
 
   setRepoManager(repoManager: RepoManager): void {
@@ -146,7 +148,7 @@ export class SessionManager extends EventEmitter {
         });
       };
 
-      const acpClient = new ACPClient(session.projectPath, permissionHandler);
+      const acpClient = new ACPClient(session.projectPath, permissionHandler, this.executor);
       await acpClient.startAgent();
       session.acpClient = acpClient;
 

@@ -102,8 +102,9 @@ export class FeishuAdapter extends BaseIMAdapter {
       domain: config.feishu.domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu,
     });
 
-    // 创建会话管理器
-    this.sessionManager = new SessionManager(config.feishu.card?.permissionTimeout);
+    // 创建会话管理器，支持自定义 executor
+    const executor = config.acp?.executor || process.env.BATON_EXECUTOR || 'opencode';
+    this.sessionManager = new SessionManager(config.feishu.card?.permissionTimeout, executor);
 
     if (repoManager && selectedRepo) {
       this.sessionManager.setRepoManager(repoManager);

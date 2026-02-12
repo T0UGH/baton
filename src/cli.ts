@@ -10,6 +10,7 @@ import { CommandDispatcher } from './core/dispatcher';
 import { SessionManager } from './core/session';
 import { TaskQueueEngine } from './core/queue';
 import { RepoManager } from './core/repo';
+import { loadConfig } from './config/loader';
 import type { IMMessage, IMResponse, Session, RepoInfo } from './types';
 import type { PermissionOption, RequestPermissionRequest } from '@agentclientprotocol/sdk';
 
@@ -64,8 +65,17 @@ export async function main(workDir?: string) {
     console.log(`📂 当前仓库: ${selectedRepo.name}\n`);
   }
 
+  // 加载配置获取 executor 设置
+  let executor = 'opencode';
+  try {
+    const config = loadConfig();
+    executor = config.acp?.executor || process.env.BATON_EXECUTOR || 'opencode';
+  } catch {
+    // 配置加载失败时使用默认值
+  }
+
   // 创建会话管理器
-  const sessionManager = new SessionManager();
+  const sessionManager = new SessionManager(300, executor);
   sessionManager.setRepoManager(repoManager);
   sessionManager.setCurrentRepo(selectedRepo);
 
