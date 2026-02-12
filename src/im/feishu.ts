@@ -207,9 +207,21 @@ export class FeishuAdapter extends BaseIMAdapter {
       ],
     };
 
-    // 发送卡片作为回复，并更新上下文 ID
+    // 尝试发送卡片
     const newMessageId = await this.sendReply(context.chatId, context.messageId, { card });
-    this.updateSessionMessageContext(sessionId, context.chatId, newMessageId);
+
+    if (newMessageId) {
+      // 卡片发送成功，更新上下文
+      this.updateSessionMessageContext(sessionId, context.chatId, newMessageId);
+    } else {
+      // 卡片发送失败，发送文本消息作为备选
+      const optionsList = options as Array<{ name: string }>;
+      const fallbackText = `**${String(toolName)}**\n\n请回复数字选择操作：\n\n${optionsList.map((opt, idx) => `${idx + 1}. ${opt.name}`).join('\n')}\n\n或者直接回复选项名称`;
+      logger.warn({ sessionId, toolName: String(toolName) }, 'Card sending failed, sending fallback text');
+      await this.sendReply(context.chatId, context.messageId, {
+        text: fallbackText,
+      });
+    }
   }
 
   private updateSessionMessageContext(sessionId: string, chatId: string, messageId: string): void {
@@ -492,18 +504,34 @@ export class FeishuAdapter extends BaseIMAdapter {
       data.reply_message_id = messageId;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const res = await this.client.im.message.create({
-      params: {
-        receive_id_type: 'chat_id',
-      },
-      data,
-    });
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const res = await this.client.im.message.create({
+        params: {
+          receive_id_type: 'chat_id',
+        },
+        data,
+      });
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-    const newMessageId = res.data?.message_id || '';
-    logger.debug({ chatId, hasReply: !!messageId, newMessageId }, 'Reply sent');
-    return newMessageId;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      const newMessageId = res.data?.message_id || '';
+      logger.debug({ chatId, hasReply: !!messageId, newMessageId }, 'Reply sent');
+      return newMessageId;
+    } catch (error) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const feishuError = error as Record<string, unknown>;
+      logger.error(
+        {
+          chatId,
+          error: String(error),
+          code: feishuError?.code,
+          feishuMsg: feishuError?.msg,
+        },
+        'Failed to send reply to Feishu'
+      );
+      // 返回空字符串表示发送失败，调用方应该处理这种情况
+      return '';
+    }
   }
 
   async addReaction(_chatId: string, messageId: string, reaction: string): Promise<void> {

@@ -25,7 +25,9 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "check": "npm run typecheck && npm run lint && npm run format:check",
-    "fix": "npm run lint:fix && npm run format"
+    "fix": "npm run lint:fix && npm run format",
+    "test:cli": "bun run src/core/test/cli-mode.ts",
+    "test:new": "bun test tests/new-architecture.test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
