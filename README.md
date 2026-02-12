@@ -62,13 +62,27 @@ bun run start:feishu
 
 Baton 基于 [ACP 协议](https://agentclientprotocol.org/)，目前支持以下 ACP Runtime：
 
-| Runtime      | 命令           | 说明                            |
-| ------------ | -------------- | ------------------------------- |
-| **opencode** | `opencode acp` | 默认，需全局安装 `opencode` CLI |
-| **codex**    | `codex-acp`    | 需可执行的 `codex-acp` 命令     |
-| **claude**   | `claude-code-acp` | 需可执行的 `claude-code-acp` 命令 |
+| Runtime      | 命令              | 说明                                |
+| ------------ | ----------------- | ----------------------------------- |
+| **opencode** | `opencode acp`    | 默认，需全局安装 `opencode` CLI     |
+| **codex**    | `codex-acp`       | 需可执行的 `codex-acp` 命令         |
+| **claude**   | `claude-code-acp` | 需可执行的 `claude-code-acp` 命令   |
 
 > ACP 是开放协议，未来将支持更多兼容 ACP 的 Runtime。
+
+### ACP Runtime 安装链接
+
+为避免找不到安装入口，建议直接使用下列官方仓库：
+
+- Codex ACP: https://github.com/zed-industries/codex-acp
+- Claude Code ACP: https://github.com/zed-industries/claude-code-acp
+
+安装完成后请确认命令可用：
+
+```bash
+codex-acp --help
+claude-code-acp --help
+```
 
 ## 快速开始
 
@@ -141,13 +155,30 @@ baton cli
 
 ## 使用指令
 
-| 指令        | 说明                 |
-| ----------- | -------------------- |
-| `/help`     | 显示帮助             |
-| `/current`  | 查看会话状态         |
-| `/stop all` | 停止所有任务         |
-| `/reset`    | 重置会话             |
-| 任意文本    | 发送 Prompt 给 Agent |
+### 指令列表
+
+| 指令 | 用法 | 说明 |
+| --- | --- | --- |
+| `/repo` | `/repo` | 列出可用仓库，并进入数字选择交互 |
+| `/repo [序号/名称]` | `/repo 2` 或 `/repo my-repo` | 直接切换到目标仓库 |
+| `/current` | `/current` | 查看当前会话、队列与任务状态 |
+| `/stop` | `/stop` | 停止当前任务 |
+| `/stop [id]` | `/stop 3` | 停止指定任务 |
+| `/stop all` | `/stop all` | 停止当前任务并清空队列 |
+| `/reset` | `/reset` | 重置当前会话（清除上下文） |
+| `/new` | `/new` | `/reset` 的别名 |
+| `/mode` | `/mode` | 打开 Mode 选择（数字交互） |
+| `/mode [name]` | `/mode code` | 直接切换 Agent Mode |
+| `/model` | `/model` | 打开 Model 选择（数字交互） |
+| `/model [name]` | `/model gpt-5` | 直接切换模型 |
+| `/help` | `/help` | 显示帮助信息 |
+| 任意非指令文本 | `帮我修这个 bug` | 作为 Prompt 转发给 ACP Agent |
+
+### 指令使用说明
+
+- 所有以 `/` 开头但不在上表中的内容，也会按普通 Prompt 转发给 Agent。
+- 当系统要求确认权限或选择项时，优先使用数字回复（`1`、`2`...）。
+- 也支持文本回复：`allow` / `deny` / `cancel` / `yes` / `no` / `y` / `n`，或直接输入选项名。
 
 ## License
 
