@@ -210,7 +210,11 @@ export class TestSessionManager extends EventEmitter {
 
   // ============ Session Operations ============
 
-  resolveInteraction(sessionId: string, requestId: string, optionIdOrIndex: string): IMResponse {
+  async resolveInteraction(
+    sessionId: string,
+    requestId: string,
+    optionIdOrIndex: string
+  ): Promise<IMResponse> {
     const session = this.getSessionById(sessionId);
     if (!session) {
       return {

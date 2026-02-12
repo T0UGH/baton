@@ -122,7 +122,7 @@ describe('E2E Feishu Card Interaction', () => {
     permissionEvent = null;
 
     // 模拟用户通过卡片选择允许
-    const resolveResult = sessionManager.resolveInteraction(session.id, requestId, 'allow');
+    const resolveResult = await sessionManager.resolveInteraction(session.id, requestId, 'allow');
 
     expect(resolveResult.success).toBe(true);
     expect(session.pendingInteractions.size).toBe(0);

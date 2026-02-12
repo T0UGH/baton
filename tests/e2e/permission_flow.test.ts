@@ -117,7 +117,7 @@ describe('E2E Permission Flow', () => {
     session.pendingInteractions.set('test-req', mockInteraction);
 
     // 测试通过索引选择
-    const result = sessionManager.resolveInteraction(session.id, 'test-req', '1');
+    const result = await sessionManager.resolveInteraction(session.id, 'test-req', '1');
     expect(result.success).toBe(true);
     expect(result.message).toContain('opt2');
   });
@@ -145,7 +145,7 @@ describe('E2E Permission Flow', () => {
     session.pendingInteractions.set('test-req-2', mockInteraction);
 
     // 测试通过 optionId 选择
-    const result = sessionManager.resolveInteraction(session.id, 'test-req-2', 'allow');
+    const result = await sessionManager.resolveInteraction(session.id, 'test-req-2', 'allow');
     expect(result.success).toBe(true);
     expect(result.message).toContain('allow');
   });
@@ -173,7 +173,7 @@ describe('E2E Permission Flow', () => {
     session.pendingInteractions.set('invalid-req', mockInteraction);
 
     // 测试无效选项
-    const result = sessionManager.resolveInteraction(session.id, 'invalid-req', '99');
+    const result = await sessionManager.resolveInteraction(session.id, 'invalid-req', '99');
     expect(result.success).toBe(false);
     expect(result.message).toContain('无效的选项');
   });
@@ -206,7 +206,7 @@ describe('E2E Permission Flow', () => {
   });
 
   it('should handle non-existent session for permission resolution', async () => {
-    const result = sessionManager.resolveInteraction('non-existent', 'req-id', '0');
+    const result = await sessionManager.resolveInteraction('non-existent', 'req-id', '0');
     expect(result.success).toBe(false);
     expect(result.message).toContain('not found');
   });
@@ -218,7 +218,7 @@ describe('E2E Permission Flow', () => {
       testProjectPath
     );
 
-    const result = sessionManager.resolveInteraction(session.id, 'non-existent-req', '0');
+    const result = await sessionManager.resolveInteraction(session.id, 'non-existent-req', '0');
     expect(result.success).toBe(false);
     expect(result.message).toContain('not found or expired');
   });

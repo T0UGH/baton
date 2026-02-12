@@ -165,7 +165,11 @@ export class SessionManager extends EventEmitter {
   }
 
   // 处理权限确认结果
-  resolveInteraction(sessionId: string, requestId: string, optionIdOrIndex: string): IMResponse {
+  async resolveInteraction(
+    sessionId: string,
+    requestId: string,
+    optionIdOrIndex: string
+  ): Promise<IMResponse> {
     // 查找 session
     let session: Session | undefined;
     for (const s of sessions.values()) {
@@ -225,7 +229,53 @@ export class SessionManager extends EventEmitter {
       }
     }
 
-    // 执行回调
+    // 对于 repo_selection 类型，直接处理并返回切换成功卡片
+    if (pending.type === 'repo_selection') {
+      const repoManager = this.getRepoManager();
+      if (repoManager) {
+        const targetRepo = repoManager.findRepo(finalOptionId);
+        if (targetRepo) {
+          await this.resetAllSessions();
+          this.setCurrentRepo(targetRepo);
+          pending.resolve(finalOptionId);
+          session.pendingInteractions.delete(requestId);
+          logger.info(
+            { sessionId, requestId, finalOptionId, repoName: targetRepo.name },
+            'Repository switched'
+          );
+          return {
+            success: true,
+            message: `🔄 已切换到仓库: ${targetRepo.name}`,
+            card: {
+              title: '📦 仓库切换成功',
+              elements: [
+                {
+                  type: 'markdown',
+                  content: `✅ 已切换到仓库：**${targetRepo.name}**`,
+                },
+                {
+                  type: 'markdown',
+                  content: `📂 路径: \`${targetRepo.path}\``,
+                },
+                {
+                  type: 'markdown',
+                  content: '💡 新的会话将在下次发送消息时自动创建',
+                },
+              ],
+            },
+          };
+        }
+      }
+      pending.resolve(finalOptionId);
+      session.pendingInteractions.delete(requestId);
+      return {
+        success: false,
+        message: `未找到仓库: ${finalOptionId}`,
+        card: this.createStatusCard('仓库切换', `未找到仓库: ${finalOptionId}`, false),
+      };
+    }
+
+    // 其他类型：执行回调并返回通用确认卡片
     pending.resolve(finalOptionId);
     session.pendingInteractions.delete(requestId);
 
@@ -255,8 +305,42 @@ export class SessionManager extends EventEmitter {
       };
     }
 
-    // 直接返回仓库列表卡片（不通过 permissionRequest 事件）
+    // 使用 Promise 等待用户选择（不立即 resolve）
     const currentRepo = this.getCurrentRepo();
+    const listCard: IMResponse = {
+      success: true,
+      message: '请选择仓库',
+      card: {
+        title: '📦 选择仓库',
+        elements: [
+          ...(currentRepo
+            ? [
+                {
+                  type: 'markdown' as const,
+                  content: `📂 当前仓库：**${currentRepo.name}**\n`,
+                },
+                {
+                  type: 'hr' as const,
+                },
+              ]
+            : []),
+          {
+            type: 'markdown' as const,
+            content: '请回复序号选择仓库：',
+          },
+          {
+            type: 'markdown' as const,
+            content: repos.map((r, idx) => `${idx + 1}. ${r.name}`).join('\n'),
+          },
+          {
+            type: 'markdown' as const,
+            content: '\n💡 直接回复序号或仓库名称即可',
+          },
+        ],
+      },
+    };
+
+    // 设置 pendingInteraction，Promise 会在用户选择后 resolve
     return new Promise(resolve => {
       const requestId = generateUUID();
       session.pendingInteractions.set(requestId, {
@@ -317,39 +401,8 @@ export class SessionManager extends EventEmitter {
         },
       });
 
-      // 直接 resolve 返回仓库列表卡片
-      resolve({
-        success: true,
-        message: '请选择仓库',
-        card: {
-          title: '📦 选择仓库',
-          elements: [
-            ...(currentRepo
-              ? [
-                  {
-                    type: 'markdown' as const,
-                    content: `📂 当前仓库：**${currentRepo.name}**\n`,
-                  },
-                  {
-                    type: 'hr' as const,
-                  },
-                ]
-              : []),
-            {
-              type: 'markdown' as const,
-              content: '请回复序号选择仓库：',
-            },
-            {
-              type: 'markdown' as const,
-              content: repos.map((r, idx) => `${idx + 1}. ${r.name}`).join('\n'),
-            },
-            {
-              type: 'markdown' as const,
-              content: '\n💡 直接回复序号或仓库名称即可',
-            },
-          ],
-        },
-      });
+      // 触发事件发送选择列表卡片（不 resolve Promise）
+      this.emit('selectionPrompt', { sessionId: session.id, requestId, response: listCard });
     });
   }
 

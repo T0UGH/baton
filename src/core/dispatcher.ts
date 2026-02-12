@@ -69,7 +69,7 @@ export class CommandDispatcher {
         console.log(
           `[Dispatcher] Numeric input detected during pending ${interaction?.type}. Treating as selection.`
         );
-        return this.sessionManager.resolveInteraction(session.id, requestId, trimmed);
+        return await this.sessionManager.resolveInteraction(session.id, requestId, trimmed);
       } else if (command.type === 'mode' || command.type === 'model') {
         // 如果是 mode 或 model 命令，提醒用户先处理当前交互
         console.log(`[Dispatcher] Mode/Model command detected during pending interaction.`);
@@ -379,7 +379,7 @@ export class CommandDispatcher {
       await this.sessionManager.stopTask(message.userId, undefined, message.contextId);
       // 显式清理挂起的请求
       for (const [requestId] of session.pendingInteractions) {
-        this.sessionManager.resolveInteraction(session.id, requestId, 'cancel');
+        await this.sessionManager.resolveInteraction(session.id, requestId, 'cancel');
       }
     }
 

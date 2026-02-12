@@ -102,8 +102,11 @@ export class FeishuAdapter extends BaseIMAdapter {
       domain: config.feishu.domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu,
     });
 
-    // 创建会话管理器，支持自定义 executor
-    const executor = config.acp?.executor || process.env.BATON_EXECUTOR || 'opencode';
+    // 创建会话管理器，支持自定义 executor（环境变量值可用下划线或中划线）
+    const executor = (config.acp?.executor || process.env.BATON_EXECUTOR || 'opencode').replace(
+      /_/g,
+      '-'
+    );
     this.sessionManager = new SessionManager(config.feishu.card?.permissionTimeout, executor);
 
     if (repoManager && selectedRepo) {
@@ -117,6 +120,18 @@ export class FeishuAdapter extends BaseIMAdapter {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       await this.handlePermissionRequest(event);
     });
+
+    // 监听选择提示事件（如仓库选择）
+    this.sessionManager.on(
+      'selectionPrompt',
+      async (event: { sessionId: string; requestId: string; response: IMResponse }) => {
+        const { sessionId, response } = event;
+        const context = this.messageContext.get(sessionId);
+        if (context && response.card) {
+          await this.sendReply(context.chatId, context.messageId, { card: response.card });
+        }
+      }
+    );
 
     // 创建任务队列引擎，传入完成回调
     this.queueEngine = new TaskQueueEngine(this.onTaskComplete.bind(this));
@@ -328,8 +343,17 @@ export class FeishuAdapter extends BaseIMAdapter {
         });
       }
 
-      // 发送到指令分发器
-      const response = await this.dispatcher.dispatch(imMessage);
+      // 检查是否有待处理的交互（如仓库选择）
+      let response: IMResponse;
+      const pendingInteraction = this.getPendingInteraction(session.id, text.trim());
+      if (pendingInteraction) {
+        // 处理选择
+        const { requestId, optionId } = pendingInteraction;
+        response = await this.sessionManager.resolveInteraction(session.id, requestId, optionId);
+      } else {
+        // 发送到指令分发器
+        response = await this.dispatcher.dispatch(imMessage);
+      }
 
       // 发送回复（优先使用卡片格式）
       if (response.card) {
@@ -424,7 +448,11 @@ export class FeishuAdapter extends BaseIMAdapter {
         );
 
         // 调用 SessionManager 解决权限
-        const result = this.sessionManager.resolveInteraction(session_id, request_id, option_id);
+        const result = await this.sessionManager.resolveInteraction(
+          session_id,
+          request_id,
+          option_id
+        );
 
         // 返回 Toast 提示
         return {
@@ -597,6 +625,42 @@ export class FeishuAdapter extends BaseIMAdapter {
     }
 
     logger.info({ sessionId: session.id, chatId }, 'Task completed and rich card sent');
+  }
+
+  // 检查是否是待处理交互的选择回复
+  private getPendingInteraction(
+    sessionId: string,
+    text: string
+  ): { requestId: string; optionId: string } | null {
+    const session = this.sessionManager.getSessionById(sessionId);
+    if (!session || session.pendingInteractions.size === 0) {
+      return null;
+    }
+
+    // 检查输入是否是数字或选项名
+    const trimmed = text.trim();
+
+    // 获取第一个 pendingInteraction
+    for (const [requestId, interaction] of session.pendingInteractions) {
+      // 检查是否是序号（1-based）
+      const index = parseInt(trimmed, 10);
+      if (!isNaN(index)) {
+        const arrayIndex = index - 1;
+        if (arrayIndex >= 0 && arrayIndex < interaction.data.options.length) {
+          return { requestId, optionId: interaction.data.options[arrayIndex].optionId };
+        }
+      }
+
+      // 检查是否是选项名称
+      const option = interaction.data.options.find(
+        o => o.name.toLowerCase() === trimmed.toLowerCase()
+      );
+      if (option) {
+        return { requestId, optionId: option.optionId };
+      }
+    }
+
+    return null;
   }
 
   private truncateMessage(msg: string, limit: number): string {
