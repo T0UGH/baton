@@ -540,32 +540,68 @@ API 设计流程。
 
 ## 9. 跨平台适配
 
-### 9.1 统一格式
+### 9.1 核心策略
+
+**Claude Code 是标准，其他平台来适配它。**
+
+SpecCraft 专注于：
+1. 产出标准的 SKILL.md 格式
+2. 支持作为 Claude Code marketplace 使用
+3. 其他平台的适配交给生态
+
+### 9.2 产物格式
 
 SpecCraft 产物是纯静态文件：
-- `SKILL.md` — Markdown 格式，所有 Agent 平台通用
-- `workflow.yaml` — YAML 格式，CLI 通用
-- `templates/` — Markdown 模板
 
-### 9.2 各平台适配
-
-| 平台 | 适配方式 |
-|------|----------|
-| Claude Code | 直接作为 marketplace plugin 使用 |
-| OpenCode | 转换为 `.opencode/` 格式 |
-| Codex | 转换为 `.codex/` 格式 |
-| Cursor | 转换为 `.cursor/` 格式 |
-
-### 9.3 转换工具
-
-```bash
-# 可选：转换为其他平台格式
-craft export --target opencode
-craft export --target codex
+```
+myteam-spec-workflows/
+├── marketplace.json          # Claude Code marketplace 配置
+├── brainstorm/
+│   ├── SKILL.md              # 标准 skill 格式
+│   ├── workflow.yaml         # CLI 专用配置
+│   └── templates/
+└── feature-dev/
+    └── ...
 ```
 
----
+- `SKILL.md` — Markdown 格式，通用标准
+- `workflow.yaml` — YAML 格式，CLI 专用
+- `templates/` — Markdown 模板
 
+### 9.3 Claude Code 使用
+
+作为 marketplace 直接安装：
+
+```bash
+# 安装团队的 marketplace
+/plugin marketplace add https://github.com/myteam/myteam-spec-workflows
+
+# 使用工作流
+/brainstorm init user-auth
+/feature-dev spec
+```
+
+### 9.4 其他平台适配
+
+使用第三方工具（如 [compound-plugin](https://github.com/EveryInc/compound-engineering-plugin)）将 Claude Code 格式转换为其他平台：
+
+```bash
+# 转换为 OpenCode
+bunx @every-env/compound-plugin install myteam-spec-workflows --to opencode
+
+# 转换为 Codex
+bunx @every-env/compound-plugin install myteam-spec-workflows --to codex
+
+# 转换为 Cursor
+bunx @every-env/compound-plugin install myteam-spec-workflows --to cursor
+
+# 转换为 Gemini
+bunx @every-env/compound-plugin install myteam-spec-workflows --to gemini
+```
+
+**理念**：不重复造轮子，让生态来解决平台差异。
+
+---
 ## 10. 命令类型系统
 
 ### 10.1 核心理念
