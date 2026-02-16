@@ -1463,3 +1463,176 @@ craft run feature-dev implement --skip design  # 跳过设计直接写代码
 ```
 
 ---
+
+---
+
+## 15. 状态失效与增量更新
+
+### 15.1 核心理念
+
+当上游命令重新执行时，下游命令**状态失效但产物保留**：
+
+- 状态标记为 `needs-update`，提醒用户需要同步
+- 产物文件（文档、代码）保留，支持增量更新
+- 不是推倒重来，而是迭代演进
+
+### 15.2 状态值定义
+
+| 状态 | 说明 |
+|------|------|
+| `pending` | 待开始，无产物 |
+| `in_progress` | 进行中 |
+| `completed` | 已完成，产物有效 |
+| `needs-update` | 需要更新（上游有变化，产物保留但可能过期） |
+| `failed` | 执行失败 |
+| `skipped` | 已跳过 |
+
+### 15.3 使用场景
+
+#### 场景：写到 design 时发现 spec 需要补充
+
+```bash
+# 当前状态：spec 完成，design 进行中
+craft run feature-dev status
+
+# ┌─────────────────────────────────────────┐
+# │ 📋 feature-dev: user-auth               │
+# ├─────────────────────────────────────────┤
+# │ ✅ spec     已完成                       │
+# │ 🔄 design   进行中 (2/4 章节)            │
+# │ ⏳ tasks   待开始                        │
+# └─────────────────────────────────────────┘
+
+# 发现 spec 需要补充，重新执行
+craft run feature-dev spec --force
+
+# ⚠️  检测到以下命令依赖 spec，将标记为需要更新：
+#   - design (in_progress → needs-update)
+#   - tasks (pending → pending，不受影响)
+#   - implement (pending → pending，不受影响)
+#
+# 产物文件保留，执行相关命令时可选择增量更新。
+# 确认继续？ (y/N): y
+#
+# ✅ 执行 spec...
+# 📝 design.md 已保留，下次执行 design 时会提示增量更新
+
+# 更新后的状态
+craft run feature-dev status
+
+# ┌─────────────────────────────────────────┐
+# │ 📋 feature-dev: user-auth               │
+# ├─────────────────────────────────────────┤
+# │ ✅ spec     已完成 (刚刚更新)            │
+# │ ⚡ design   需要更新 (产物保留)          │
+# │ ⏳ tasks   待开始                        │
+# └─────────────────────────────────────────┘
+```
+
+### 15.4 执行 needs-update 命令
+
+当执行状态为 `needs-update` 的命令时，CLI 提供增量更新选项：
+
+```bash
+craft run feature-dev design
+
+# 📋 检测到 spec 有更新，当前 design.md 可能需要同步更新
+#
+# 现有 design.md 包含：
+#   - 背景与目标 ✅
+#   - 用户故事 ✅
+#   - 功能需求 ✅
+#   - 验收标准 ✅
+#
+# 选项：
+#   1. 增量更新（保留现有内容，只处理变化部分）
+#   2. 完全重新生成（覆盖现有内容）
+#   3. 跳过（保持现状，标记为 completed）
+#
+# 请选择 (1/2/3): 1
+
+# 🔍 分析 spec 变化...
+# 📝 新增章节：权限控制
+# 📝 更新章节：用户故事（新增 2 条）
+#
+# ✅ design.md 已增量更新
+```
+
+### 15.5 依赖链传播
+
+状态失效会沿着依赖链传播：
+
+```yaml
+# 依赖关系
+spec → design → tasks → implement → test
+```
+
+```bash
+# 重新执行 spec
+craft run feature-dev spec --force
+
+# 状态传播：
+# spec:      completed → completed (重新执行)
+# design:    completed → needs-update
+# tasks:     completed → needs-update
+# implement: completed → needs-update
+# test:      completed → needs-update
+
+# 但如果只重新执行 design
+craft run feature-dev design --force
+
+# 状态传播（不影响 spec）：
+# spec:      completed (不变，是上游)
+# design:    completed → completed (重新执行)
+# tasks:     completed → needs-update
+# implement: completed → needs-update
+# test:      completed → needs-update
+```
+
+### 15.6 状态文件示例
+
+```yaml
+# .craft/state/feature-dev/user-auth.yaml
+instance: user-auth
+workflow: feature-dev
+updatedAt: 2026-02-16T14:30:00Z
+
+commands:
+  spec:
+    status: completed
+    completedAt: 2026-02-16T14:30:00Z
+    output: specs/user-auth/spec.md
+    
+  design:
+    status: needs-update
+    previousStatus: completed  # 记录之前的状态
+    invalidatedBy: spec       # 被谁失效的
+    invalidatedAt: 2026-02-16T14:30:00Z
+    output: specs/user-auth/design.md  # 产物保留
+    chapters:
+      background: completed
+      user-stories: completed
+      requirements: completed
+      acceptance-criteria: completed
+      
+  tasks:
+    status: needs-update
+    previousStatus: completed
+    invalidatedBy: design
+    output: specs/user-auth/tasks.md
+```
+
+### 15.7 相关命令
+
+```bash
+# 查看哪些命令需要更新
+craft run feature-dev status --show-outdated
+
+# 一次性更新所有 needs-update 的命令
+craft run feature-dev update-all
+
+# 强制将某个命令标记为 completed（跳过更新）
+craft run feature-dev design --mark-completed
+```
+
+---
