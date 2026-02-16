@@ -131,3 +131,8 @@ export async function main(configPath?: string, workDir?: string) {
     process.exit(1);
   }
 }
+
+main().catch((err: Error) => {
+  logger.error({ error: err }, 'Failed to start');
+  process.exit(1);
+});

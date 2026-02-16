@@ -94,7 +94,11 @@ export class WhatsAppAdapter extends BaseIMAdapter {
       /_/g,
       '-'
     );
-    const acpLaunchConfig = config.acp?.command
+    // 创建 acpLaunchConfig，即使没有 command 也要传递 env
+    const acpLaunchConfig = config.acp?.command ||
+      config.acp?.args ||
+      config.acp?.cwd ||
+      config.acp?.env
       ? {
           command: config.acp.command,
           args: config.acp.args,

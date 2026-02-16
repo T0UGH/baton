@@ -22,7 +22,16 @@ interface PermissionRequestEvent {
 
 // 模拟 IM 消息循环
 export async function main(workDir?: string) {
-  const rootPath = path.resolve(workDir || process.cwd());
+  // 加载配置获取项目路径
+  let configRootPath: string | undefined;
+  try {
+    const config = loadConfig();
+    configRootPath = config.project?.path;
+  } catch {
+    // 配置加载失败时使用默认值
+  }
+
+  const rootPath = path.resolve(workDir || configRootPath || process.cwd());
 
   console.log('╔════════════════════════════════════════╗');
   console.log('║           Baton CLI v0.1.0             ║');
@@ -76,7 +85,8 @@ export async function main(workDir?: string) {
       /_/g,
       '-'
     );
-    if (config.acp?.command) {
+    // 创建 acpLaunchConfig，即使没有 command 也要传递 env
+    if (config.acp?.command || config.acp?.args || config.acp?.cwd || config.acp?.env) {
       acpLaunchConfig = {
         command: config.acp.command,
         args: config.acp.args,

@@ -409,7 +409,42 @@ export class ACPClient {
     let command: string;
     let args: string[];
     let cwd = this.projectPath;
-    let env: Record<string, string | undefined> = process.env;
+
+    // 清除可能导致 SSL/代理问题的环境变量
+    const proxyVarsToRemove = [
+      'ICUBE_PROXY_HOST',
+      'ICUBE_PROXY_PORT',
+      'http_proxy',
+      'https_proxy',
+      'HTTP_PROXY',
+      'HTTPS_PROXY',
+      'ALL_PROXY',
+      'all_proxy',
+    ];
+
+    // 创建干净的环境变量副本，排除代理相关变量
+    let env: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (!proxyVarsToRemove.includes(key)) {
+        env[key] = value;
+      }
+    }
+
+    // 如果有 env 配置，应用它
+    if (this.launchConfig?.env) {
+      env = { ...env, ...this.launchConfig.env };
+    }
+
+    // 打印关键环境变量用于调试
+    logger.info('[ACP] Environment variables for agent:');
+    logger.info(`  ANTHROPIC_BASE_URL: ${env.ANTHROPIC_BASE_URL}`);
+    logger.info(`  ANTHROPIC_API_KEY: ${env.ANTHROPIC_API_KEY ? env.ANTHROPIC_API_KEY.substring(0, 10) + '...' : 'NOT SET'}`);
+    logger.info(`  ANTHROPIC_AUTH_TOKEN: ${env.ANTHROPIC_AUTH_TOKEN ? env.ANTHROPIC_AUTH_TOKEN.substring(0, 10) + '...' : 'NOT SET'}`);
+    logger.info(`  ANTHROPIC_DEFAULT_SONNET_MODEL: ${env.ANTHROPIC_DEFAULT_SONNET_MODEL}`);
+    logger.info(`  ICUBE_PROXY_HOST: ${env.ICUBE_PROXY_HOST || 'NOT SET'}`);
+    logger.info(`  ICUBE_PROXY_PORT: ${env.ICUBE_PROXY_PORT || 'NOT SET'}`);
+    logger.info(`  http_proxy: ${env.http_proxy || 'NOT SET'}`);
+    logger.info(`  https_proxy: ${env.https_proxy || 'NOT SET'}`);
 
     if (this.launchConfig?.command) {
       command = this.launchConfig.command;
@@ -418,9 +453,6 @@ export class ACPClient {
         cwd = path.isAbsolute(this.launchConfig.cwd)
           ? this.launchConfig.cwd
           : path.resolve(this.projectPath, this.launchConfig.cwd);
-      }
-      if (this.launchConfig.env) {
-        env = { ...process.env, ...this.launchConfig.env };
       }
     } else {
       switch (this.executor) {
